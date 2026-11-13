@@ -3,7 +3,7 @@
 use crate::events::WM_APP_TRAY;
 use crate::state::OyenzaLink;
 use crate::updates::UpdateLine;
-use poni_core::settings::{IdleStyle, Settings, Theme};
+use poni_core::settings::{IdleStyle, MotionMode, Settings, Theme};
 use windows::core::{Result, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -55,6 +55,8 @@ impl Tray {
 pub enum MenuCmd {
     ToggleIdleStyle(IdleStyle),
     SetTheme(Theme),
+    ToggleMotion(MotionMode),
+    ToggleDebugOverlay,
     ToggleSystemHistory,
     ToggleLyrics,
     TogglePronunciation,
@@ -137,6 +139,14 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         // The status bar is listed only in Pill, as on the Settings page: the
         // other themes would draw the clock for it (Diorama its picture).
         MenuItem::Sub { label: "Idle look".into(), items: crate::pill::status::looks(s.theme).iter().map(|l| style(*l)).collect() },
+        MenuItem::Sub {
+            label: "Motion".into(),
+            items: vec![
+                item("Full (Smooth Springs)", MenuCmd::ToggleMotion(MotionMode::Full), s.motion == MotionMode::Full),
+                item("Reduced (Fast Critically Damped)", MenuCmd::ToggleMotion(MotionMode::Reduced), s.motion == MotionMode::Reduced),
+            ],
+        },
+        item("Debug Overlay (Ctrl+Alt+F)", MenuCmd::ToggleDebugOverlay, false),
         MenuItem::Separator,
         item("Synced lyrics", MenuCmd::ToggleLyrics, s.lyrics),
         item("Lyrics pronunciation (romaji, pinyin, Korean)", MenuCmd::TogglePronunciation, s.lyrics_pronunciation),
@@ -309,7 +319,7 @@ mod tests {
             .collect();
         let at = |cmd: MenuCmd| labels.iter().position(|l| l.1 == cmd);
         let about = at(MenuCmd::About).expect("no About line");
-        assert!(labels[about].0.starts_with(&format!("About Oyenza Studio {}", env!("CARGO_PKG_VERSION"))), "{}", labels[about].0);
+        assert!(labels[about].0.starts_with(&format!("About Dynamic Notch {}", env!("CARGO_PKG_VERSION"))), "{}", labels[about].0);
         // Right above Quit, with the lyrics credit kept above it.
         assert_eq!(at(MenuCmd::Quit), Some(about + 1));
         assert_eq!(at(MenuCmd::LyricsCredit), Some(about - 1));

@@ -44,10 +44,10 @@ mod tests {
 
     #[test]
     fn the_about_line_says_which_build_this_is() {
-        assert_eq!(label("0.2.3", "release", "c7d77c8", "25 Oct 2026"), "About Oyenza Studio 0.2.3 (25 Oct 2026)");
-        assert_eq!(label("0.2.3", "test", "c7d77c8", "25 Oct 2026"), "About Oyenza Studio 0.2.3 (test build c7d77c8, 25 Oct 2026)");
-        assert_eq!(label("0.2.3", "local", "", ""), "About Oyenza Studio 0.2.3 (local build)");
-        assert!(about_label().starts_with(&format!("About Oyenza Studio {VERSION}")));
+        assert_eq!(label("0.2.3", "release", "c7d77c8", "25 Oct 2026"), "About Dynamic Notch 0.2.3 (25 Oct 2026)");
+        assert_eq!(label("0.2.3", "test", "c7d77c8", "25 Oct 2026"), "About Dynamic Notch 0.2.3 (test build c7d77c8, 25 Oct 2026)");
+        assert_eq!(label("0.2.3", "local", "", ""), "About Dynamic Notch 0.2.3 (local build)");
+        assert!(about_label().starts_with(&format!("About Dynamic Notch {VERSION}")));
     }
 
     #[test]

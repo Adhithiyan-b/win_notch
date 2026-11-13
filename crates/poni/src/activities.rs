@@ -1067,6 +1067,7 @@ mod tests {
             track_key: key.clone(),
         });
         if let Some(l) = lrc {
+            st.settings.lyrics = true;
             st.lyrics = LyricsState { track_key: key, status: LyricsStatus::Found, lyrics: Some(parse_lrc(l)), source: "Sample".into(), ruby: Vec::new(), wants_ja_readings: false };
         }
         st
@@ -1100,6 +1101,7 @@ mod tests {
         let mut st = playing(Some("[00:10.00]紙の舟よ\n[00:14.00]Paper boats\n"));
         assert_eq!(geom(&media, &st).h, 32.0, "no readings: one row");
         st.lyrics.ruby = vec![vec![Ruby { text: "紙の舟よ".into(), roman: "kami no fune yo".into() }], Vec::new()];
+        st.settings.lyrics_pronunciation = true;
         for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill, Theme::Diorama] {
             st.settings.theme = theme;
             assert_eq!(geom(&media, &st).h, crate::pill::media::H_READS, "{theme:?}: the line over its reading");

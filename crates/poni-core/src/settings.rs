@@ -45,6 +45,14 @@ pub enum Theme {
     Diorama,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionMode {
+    #[default]
+    Full,
+    Reduced,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorChoice {
@@ -77,6 +85,8 @@ pub struct Settings {
     /// Width of the expanded island in DIPs (bigger = roomier pages).
     pub expanded_width: f32,
     pub hide_in_fullscreen: bool,
+    #[serde(default)]
+    pub motion: MotionMode,
     /// Step aside over maximized windows: the resting island turned into the
     /// Hidden look's invisible strip while an app window reached the top of
     /// the screen under it. 0.2.4 and 0.2.5 did it by default and it read as
@@ -269,6 +279,7 @@ impl Default for Settings {
             collapse_delay_ms: 0,
             expanded_width: 620.0,
             hide_in_fullscreen: true,
+            motion: MotionMode::Full,
             step_aside: false,
             monitor: MonitorChoice::Primary,
             island_x: None,

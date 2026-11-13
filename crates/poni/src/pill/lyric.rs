@@ -509,6 +509,7 @@ mod tests {
 
     fn song(lrc: &str) -> AppState {
         let mut st = AppState::new(Settings::default(), Store::default());
+        st.settings.lyrics = true;
         let key = MediaSession::make_track_key("Paper Boats", "The Lanterns", "Harbor Lights");
         st.media = Some(MediaSession {
             app_id: "Spotify.exe".into(),
@@ -792,6 +793,7 @@ mod tests {
 
     fn song_ja() -> AppState {
         let mut st = song(SONG_JA);
+        st.settings.lyrics_pronunciation = true;
         st.lyrics.ruby = vec![
             pieces(&[("紙の", "kami no"), ("舟よ", "fune yo")]),
             Vec::new(),

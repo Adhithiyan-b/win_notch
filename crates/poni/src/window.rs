@@ -238,7 +238,7 @@ pub fn windows_build() -> Option<u32> {
 pub fn create_helper_window() -> Result<HWND> {
     unsafe {
         let hinst = GetModuleHandleW(None)?;
-        CreateWindowExW(WS_EX_TOOLWINDOW, HELPER_CLASS, w!("Poni Helper"), WS_POPUP, 0, 0, 0, 0, None, None, hinst, None)
+        CreateWindowExW(WS_EX_TOOLWINDOW, HELPER_CLASS, w!("Dynamic Notch Helper"), WS_POPUP, 0, 0, 0, 0, None, None, hinst, None)
     }
 }
 

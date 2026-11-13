@@ -70,6 +70,9 @@ pub struct Island {
     /// Whether a frame has moved the island yet. Until then a new gap is
     /// taken at once: the island starts where it rests, without a slide.
     stepped: bool,
+    /// When set, reduced motion replaces playful overshoot springs with
+    /// critically damped transitions and instant crossfades.
+    reduced_motion: bool,
 }
 
 impl Island {
@@ -86,6 +89,7 @@ impl Island {
             floor_w: None,
             floor_h: None,
             stepped: false,
+            reduced_motion: false,
         }
     }
 
@@ -131,7 +135,10 @@ impl Island {
         self.target = g;
         let growing = self.tune();
         self.aim();
-        if new_content {
+        if self.reduced_motion {
+            self.fade_in_at = None;
+            self.content.set_target(1.0);
+        } else if new_content {
             self.content.snap(0.0);
             self.fade_in_at = Some(now + if growing { FADE_DELAY_GROW } else { FADE_DELAY_SHRINK });
         }
@@ -142,6 +149,17 @@ impl Island {
     fn tune(&mut self) -> bool {
         let g = self.target;
         let growing = g.w * g.h > self.w.value * self.h.value;
+        if self.reduced_motion {
+            // Critically damped transitions (zeta = 1.0):
+            // k = 750, c = 2 * sqrt(750) = 54.77 ~= 54.8
+            self.w.retune(750.0, 54.8);
+            self.h.retune(750.0, 54.8);
+            self.r.retune(750.0, 54.8);
+            self.content.retune(850.0, 58.3);
+            self.floor_w = None;
+            self.floor_h = None;
+            return growing;
+        }
         if self.gap.is_some() {
             // Floating: each axis by its own direction, so an axis that
             // shrinks while the other grows still lands on its size.
@@ -298,6 +316,23 @@ impl Island {
             body
         }
     }
+
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        if self.reduced_motion != reduced {
+            self.reduced_motion = reduced;
+            self.tune();
+        }
+    }
+
+    pub fn is_reduced_motion(&self) -> bool {
+        self.reduced_motion
+    }
+
+    pub fn spring_w(&self) -> &Spring { &self.w }
+    pub fn spring_h(&self) -> &Spring { &self.h }
+    pub fn spring_r(&self) -> &Spring { &self.r }
+    pub fn spring_top(&self) -> &Spring { &self.top }
+    pub fn spring_content(&self) -> &Spring { &self.content }
 }
 
 /// The size an axis heading for `to` must not go below: `to` itself when it
@@ -580,5 +615,25 @@ mod tests {
         assert_eq!(i.w.velocity, v);
         i.set_floating(None);
         assert_eq!((tuning(&i.w), tuning(&i.h), tuning(&i.r)), (GROW_W, GROW_H, RADIUS));
+    }
+
+    #[test]
+    fn reduced_motion_uses_critically_damped_springs_and_instant_content() {
+        let mut i = Island::new(PILL);
+        i.set_reduced_motion(true);
+        assert!(i.is_reduced_motion());
+        i.set_target(CARD, 0.0, false);
+        assert_eq!(tuning(&i.w), (750.0, 54.8));
+        assert_eq!(tuning(&i.h), (750.0, 54.8));
+        assert_eq!(tuning(&i.r), (750.0, 54.8));
+        assert_eq!(tuning(&i.content), (850.0, 58.3));
+        assert_eq!(i.content.target, 1.0);
+        assert_eq!(i.fade_in_at, None);
+        let mut max_w: f32 = 0.0;
+        let t = run(&mut i, 240.0, 1.0, |i| {
+            max_w = max_w.max(i.current().w);
+        });
+        assert!(t < 0.60, "reduced motion should settle in <600ms, took {t}s");
+        assert!(max_w <= CARD.w + 1e-4, "critically damped spring must not overshoot");
     }
 }

@@ -19,11 +19,11 @@ fn env_dir(var: &str) -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    home_override().unwrap_or_else(|| env_dir("APPDATA").join("Poni"))
+    home_override().unwrap_or_else(|| env_dir("APPDATA").join("DynamicNotch"))
 }
 
 pub fn cache_dir() -> PathBuf {
-    home_override().map(|h| h.join("cache")).unwrap_or_else(|| env_dir("LOCALAPPDATA").join("Poni"))
+    home_override().map(|h| h.join("cache")).unwrap_or_else(|| env_dir("LOCALAPPDATA").join("DynamicNotch"))
 }
 
 pub fn settings_path() -> PathBuf {
@@ -35,7 +35,7 @@ pub fn store_path() -> PathBuf {
 }
 
 pub fn log_path() -> PathBuf {
-    cache_dir().join("poni.log")
+    cache_dir().join("dynamic-notch.log")
 }
 
 pub fn lyrics_cache_dir() -> PathBuf {

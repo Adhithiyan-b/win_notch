@@ -71,6 +71,8 @@ const DROP_PEEK_EVERY_S: f64 = 30.0;
 const HOTKEY_PEEK: i32 = 1;
 /// Alt+Shift+S pauses and resumes the Script page's reading from any app.
 const HOTKEY_SCRIPT: i32 = 2;
+/// Ctrl+Alt+F toggles the real-time frame time, missed-vblank & spring debug HUD.
+const HOTKEY_DEBUG: i32 = 3;
 /// Record pressed: how long the Record page says "Opening the recorder"
 /// without word from it (a cold start of the recorder takes a few seconds).
 const REC_OPENING_S: f64 = 15.0;
@@ -127,7 +129,7 @@ pub fn main_entry() -> i32 {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
     // Single instance (the self-test may run next to a normal instance).
-    let mutex_name = if selftest_dir.is_some() { w!("Local\\Poni.Island.SelfTest") } else { w!("Local\\Poni.Island") };
+    let mutex_name = if selftest_dir.is_some() { w!("Local\\DynamicNotch.Island.SelfTest") } else { w!("Local\\DynamicNotch.Island") };
     let _mutex = unsafe { CreateMutexW(None, true, mutex_name) };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         pinfo!("another instance is running; exiting");
@@ -485,6 +487,9 @@ pub struct App {
     /// next game (or until pressed again).
     game_hidden: bool,
     /// Alt+Shift+F is registered (only while a game is in front).
+    debug_overlay: bool,
+    frame_history: Vec<f32>,
+    missed_vblanks: u64,
     peek_hotkey: bool,
     /// Alt+Shift+S is registered (only while the Script page can read).
     script_hotkey: bool,
@@ -647,6 +652,11 @@ impl App {
         let mode = Mode::Idle;
         let mut island = Island::new(activities::geom(&mode, &st));
         island.set_floating(pill::on(st.settings.theme).then_some(pill::TOP_GAP));
+        island.set_reduced_motion(st.settings.motion == poni_core::settings::MotionMode::Reduced || !windows_animations_enabled());
+        unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT};
+            let _ = RegisterHotKey(helper, HOTKEY_DEBUG, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, u32::from(b'F'));
+        }
         let clock = FrameClock::start(SendHwnd::new(hwnd), monitor.handle);
         let taskbar_created_msg = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
         // Oyenza Studio Recorder installed: the Record tab can show (one registry read).
@@ -723,6 +733,9 @@ impl App {
             game_peek_until: 0.0,
             game_drop_at: f64::NEG_INFINITY,
             game_hidden: false,
+            debug_overlay: false,
+            frame_history: Vec::with_capacity(128),
+            missed_vblanks: 0,
             peek_hotkey: false,
             script_hotkey: false,
             script_excluded: false,
@@ -837,6 +850,10 @@ impl App {
     /// Leave the message loop. Never call DestroyWindow while the app is
     /// borrowed: WM_DESTROY would re-enter and be swallowed.
     fn quit(&mut self, code: i32) {
+        unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey;
+            let _ = UnregisterHotKey(self.helper, HOTKEY_DEBUG);
+        }
         self.exit_code = code;
         self.clock.set_active(false);
         unsafe { PostQuitMessage(code) };
@@ -1009,13 +1026,14 @@ impl App {
         let t = self.island.target();
         let (bw, bh) = ((t.w * OVERSHOOT).max(g.w), (t.h * OVERSHOOT).max(g.h));
         let s = self.gfx.scale();
-        let need_w = ((bw + 2.0 * self.island.side_room()) * s).ceil() as i32;
-        let need_h = ((bh + self.island.bottom_room() + self.island.top()) * s).ceil() as i32;
+        let extra_h = if self.debug_overlay { 180.0 } else { 0.0 };
+        let need_w = ((bw + 2.0 * self.island.side_room()).max(if self.debug_overlay { 500.0 } else { 0.0 }) * s).ceil() as i32;
+        let need_h = ((bh + self.island.bottom_room() + self.island.top() + extra_h) * s).ceil() as i32;
         if need_w > self.surface.w || need_h > self.surface.h {
             let tallest = PageKind::ALL.iter().map(|p| pages::content_height(*p, &self.st)).fold(0.0f32, f32::max);
-            let body_h = (pages::HEADER_H + tallest + pages::PAD).max(bh / OVERSHOOT * 1.1);
+            let body_h = (pages::HEADER_H + tallest + pages::PAD + extra_h).max(bh / OVERSHOOT * 1.1);
             pinfo!("island outgrew the window; growing it to fit {bw:.0}x{bh:.0} DIP");
-            self.layout_surface_for(self.st.settings.expanded_width.max(bw / OVERSHOOT * 1.1), body_h);
+            self.layout_surface_for(self.st.settings.expanded_width.max(bw / OVERSHOOT * 1.1).max(520.0), body_h);
         }
     }
 
@@ -1401,6 +1419,8 @@ impl App {
                 self.refresh_monitor();
                 if msg == WM_SETTINGCHANGE {
                     self.glass.app_light = services::apps_use_light_theme();
+                    let reduced = self.st.settings.motion == poni_core::settings::MotionMode::Reduced || !windows_animations_enabled();
+                    self.island.set_reduced_motion(reduced);
                 }
                 if msg == WM_SETTINGCHANGE && self.st.settings.theme == Theme::Glass {
                     self.st.accent = theme_accent(Theme::Glass);
@@ -1500,6 +1520,11 @@ impl App {
             WM_HOTKEY if wp.0 == HOTKEY_SCRIPT as usize => {
                 self.st.now = clock::mono();
                 pages::script::toggle(&mut self.st);
+                self.request_frame();
+                Some(LRESULT(0))
+            }
+            WM_HOTKEY if wp.0 == HOTKEY_DEBUG as usize => {
+                self.debug_overlay = !self.debug_overlay;
                 self.request_frame();
                 Some(LRESULT(0))
             }
@@ -2385,6 +2410,15 @@ impl App {
         match cmd {
             ToggleIdleStyle(style) => s.idle_style = style,
             SetTheme(theme) => s.theme = theme,
+            ToggleMotion(mode) => {
+                s.motion = mode;
+                let reduced = s.motion == poni_core::settings::MotionMode::Reduced || !windows_animations_enabled();
+                self.island.set_reduced_motion(reduced);
+            }
+            ToggleDebugOverlay => {
+                self.debug_overlay = !self.debug_overlay;
+                self.request_frame();
+            }
             ToggleSystemHistory => s.system_history = !s.system_history,
             ToggleLyrics => s.lyrics = !s.lyrics,
             TogglePronunciation => s.lyrics_pronunciation = !s.lyrics_pronunciation,
@@ -3798,6 +3832,30 @@ impl App {
             self.gfx.set_look(pill::look(&self.st, false));
             None
         };
+        let debug_snap = if self.debug_overlay {
+            let sw = self.island.spring_w();
+            let sh = self.island.spring_h();
+            let sr = self.island.spring_r();
+            let sc = self.island.spring_content();
+            Some(DebugSnapshot {
+                cx: self.cx,
+                surface_h: self.surface.h,
+                hz: self.clock.nominal_hz(),
+                sw_val: sw.value,
+                sw_tgt: sw.target,
+                sw_vel: sw.velocity,
+                sh_val: sh.value,
+                sh_tgt: sh.target,
+                sh_vel: sh.velocity,
+                sr_val: sr.value,
+                sc_val: sc.value,
+                settled: self.island.settled(),
+                reduced_motion: self.island.is_reduced_motion(),
+                missed_vblanks: self.missed_vblanks,
+            })
+        } else {
+            None
+        };
         let (repaint, anim, focus, ui_live) = match self.gfx.begin(dirty) {
             Ok(mut canvas) => {
                 if self.expanded && !canvas.on_gpu() {
@@ -3878,6 +3936,10 @@ impl App {
                     canvas.pop_shape_mask();
                     canvas.unclip();
                 }
+                if let Some(snap) = debug_snap.as_ref() {
+                    let frame_ms = ((clock::mono() - draw_from) * 1000.0) as f32;
+                    draw_debug_overlay(&mut canvas, body, snap, &self.frame_history, frame_ms);
+                }
                 drop(canvas);
                 if let Err(e) = self.gfx.end() {
                     pwarn!("EndDraw failed: {e}");
@@ -3928,6 +3990,19 @@ impl App {
             self.prev_canvas_px = None;
         }
         let presented_at = clock::mono();
+        let total_frame_ms = ((presented_at - draw_from) * 1000.0) as f32;
+        self.frame_history.push(total_frame_ms);
+        if self.frame_history.len() > 120 {
+            self.frame_history.remove(0);
+        }
+        if let Some(t) = tick {
+            if !resumed && t.periods > 1 {
+                self.missed_vblanks += (t.periods - 1) as u64;
+            }
+        }
+        if total_frame_ms > 1.5 * (1000.0 * period as f32) && !resumed {
+            self.missed_vblanks += 1;
+        }
         if self.gfx.needs_hit_mask() {
             self.update_hit_mask(now);
         }
@@ -3968,7 +4043,8 @@ impl App {
             || !self.st.cmds.is_empty()
             || self.outgoing.is_some()
             || self.page_anim.is_some()
-            || self.settings_moving();
+            || self.settings_moving()
+            || self.debug_overlay;
         // The display mode's rate, not the measured period: a divisor that
         // flips between 1 and 2 would be the uneven cadence it exists to avoid.
         let hz = self.clock.nominal_hz();
@@ -5658,6 +5734,172 @@ fn draw_content(
         _ => activities::draw(&mut ui, st, &mode, body),
     }
     (ui.repaint_requested(), ui.anim_requested(), ui.focus_request(), ui.live_requested())
+}
+
+fn windows_animations_enabled() -> bool {
+    let mut enabled: windows::Win32::Foundation::BOOL = windows::Win32::Foundation::BOOL(1);
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
+        let _ = SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut enabled as *mut _ as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+    }
+    enabled.as_bool()
+}
+
+fn memory_stats() -> (f64, f64) {
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut c = PROCESS_MEMORY_COUNTERS_EX {
+        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
+        ..Default::default()
+    };
+    let ok = unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS,
+            c.cb,
+        )
+    }.is_ok();
+    if ok {
+        let ws_mb = c.WorkingSetSize as f64 / (1024.0 * 1024.0);
+        let commit_mb = c.PrivateUsage as f64 / (1024.0 * 1024.0);
+        (ws_mb, commit_mb)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+struct DebugSnapshot {
+    cx: f32,
+    surface_h: i32,
+    hz: f64,
+    sw_val: f32,
+    sw_tgt: f32,
+    sw_vel: f32,
+    sh_val: f32,
+    sh_tgt: f32,
+    sh_vel: f32,
+    sr_val: f32,
+    sc_val: f32,
+    settled: bool,
+    reduced_motion: bool,
+    missed_vblanks: u64,
+}
+
+fn draw_debug_overlay(canvas: &mut Canvas, body: Rect, snap: &DebugSnapshot, frame_history: &[f32], frame_ms: f32) {
+    use crate::gfx::{TextStyle, Weight};
+
+    let scale = canvas.scale();
+    let hud_w = 480.0f32;
+    let hud_h = 168.0f32;
+    let hud_x = snap.cx - hud_w / 2.0;
+    let mut hud_y = body.bottom() + 10.0;
+    if hud_y + hud_h > snap.surface_h as f32 / scale {
+        hud_y = (snap.surface_h as f32 / scale - hud_h - 4.0).max(0.0);
+    }
+    let hud_rect = Rect::new(hud_x, hud_y, hud_w, hud_h);
+
+    // Background and border
+    canvas.fill_rrect(hud_rect, 10.0, Color::hex(0x0E0F12).with_alpha(0.95));
+    canvas.stroke_rrect(hud_rect, 10.0, Color::white(0.14), 1.0);
+
+    let pad_x = 14.0;
+    let mut y = hud_y + 10.0;
+
+    // Title and Refresh rate / budget
+    let hz = snap.hz;
+    let budget_ms = (1000.0 / hz.max(1.0)) as f32;
+    let title_style = TextStyle::new(12.0).weight(Weight::Bold).color(Color::hex(0x00DCB4));
+    canvas.text("DYNAMIC NOTCH // DEBUG ENGINE", Rect::new(hud_x + pad_x, y, 240.0, 16.0), &title_style);
+
+    let budget_str = format!("{hz:.0} Hz · budget {budget_ms:.2} ms");
+    let budget_style = TextStyle::new(11.0).tabular().color(Color::white(0.70)).right();
+    canvas.text(&budget_str, Rect::new(hud_x + hud_w - pad_x - 200.0, y, 200.0, 16.0), &budget_style);
+    y += 20.0;
+
+    // Sparkline Graph
+    let graph_h = 36.0f32;
+    let graph_rect = Rect::new(hud_x + pad_x, y, hud_w - 2.0 * pad_x, graph_h);
+    canvas.fill_rrect(graph_rect, 4.0, Color::black(0.45));
+    canvas.stroke_rrect(graph_rect, 4.0, Color::white(0.08), 1.0);
+
+    // Budget line in graph
+    let max_ms = (budget_ms * 2.5).max(10.0);
+    let budget_line_y = graph_rect.bottom() - (budget_ms / max_ms) * graph_h;
+    canvas.line(
+        Point::new(graph_rect.x, budget_line_y),
+        Point::new(graph_rect.right(), budget_line_y),
+        Color::hex(0x00DCB4).with_alpha(0.35),
+        1.0,
+    );
+
+    // Draw sparkline bars
+    let history_len = frame_history.len();
+    if history_len > 0 {
+        let bar_w = (graph_rect.w / 120.0).max(2.0);
+        let start_x = graph_rect.right() - (history_len as f32 * bar_w);
+        for (i, &ms) in frame_history.iter().enumerate() {
+            let bx = start_x + (i as f32 * bar_w);
+            if bx < graph_rect.x {
+                continue;
+            }
+            let clamped_ms = ms.clamp(0.0, max_ms);
+            let bh = (clamped_ms / max_ms * graph_h).max(1.0);
+            let by = graph_rect.bottom() - bh;
+            let color = if ms <= budget_ms {
+                Color::hex(0x2ED573)
+            } else if ms <= budget_ms * 1.5 {
+                Color::hex(0xFFB142)
+            } else {
+                Color::hex(0xFF4757)
+            };
+            canvas.fill_rect(Rect::new(bx, by, (bar_w - 0.5).max(1.0), bh), color);
+        }
+    }
+    y += graph_h + 8.0;
+
+    // Frame timing stats (p50, p95, p99, cur, missed vblanks)
+    let (p50, p95, p99) = if !frame_history.is_empty() {
+        let mut sorted = frame_history.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = sorted.len();
+        (sorted[n * 50 / 100], sorted[(n * 95 / 100).min(n - 1)], sorted[(n * 99 / 100).min(n - 1)])
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+
+    let timing_str = format!("cur: {frame_ms:.2}ms  p50: {p50:.2}ms  p95: {p95:.2}ms  p99: {p99:.2}ms");
+    let timing_style = TextStyle::new(11.0).tabular().color(Color::white(0.90));
+    canvas.text(&timing_str, Rect::new(hud_x + pad_x, y, 280.0, 16.0), &timing_style);
+
+    let missed_color = if snap.missed_vblanks == 0 { Color::hex(0x2ED573) } else { Color::hex(0xFF4757) };
+    let dwm_str = if let Some((_, _, dm)) = dwm_counters() { format!(" (dwm missed: {dm})") } else { String::new() };
+    let missed_str = format!("missed: {}{dwm_str}", snap.missed_vblanks);
+    let missed_style = TextStyle::new(11.0).tabular().color(missed_color).right();
+    canvas.text(&missed_str, Rect::new(hud_x + hud_w - pad_x - 200.0, y, 200.0, 16.0), &missed_style);
+    y += 18.0;
+
+    // Springs state
+    let settled_str = if snap.settled { "settled" } else { "morphing" };
+    let springs_str = format!(
+        "W: {:.0}->{:.0} (v:{:+.0})  H: {:.0}->{:.0} (v:{:+.0})  R: {:.0}  α: {:.2}  [{}]",
+        snap.sw_val, snap.sw_tgt, snap.sw_vel, snap.sh_val, snap.sh_tgt, snap.sh_vel, snap.sr_val, snap.sc_val, settled_str
+    );
+    let springs_style = TextStyle::new(10.5).tabular().color(Color::white(0.75));
+    canvas.text(&springs_str, Rect::new(hud_x + pad_x, y, hud_w - 2.0 * pad_x, 16.0), &springs_style);
+    y += 18.0;
+
+    // Memory & Motion
+    let (ws_mb, commit_mb) = memory_stats();
+    let motion_name = if snap.reduced_motion { "Reduced (Critically Damped)" } else { "Full (Springs)" };
+    let win_anim = if windows_animations_enabled() { "On" } else { "Off (OS)" };
+    let bottom_str = format!("Commit: {commit_mb:.1} MB · WS: {ws_mb:.1} MB | Motion: {motion_name} | WinAnim: {win_anim}");
+    let bottom_style = TextStyle::new(10.5).tabular().color(Color::white(0.60));
+    canvas.text(&bottom_str, Rect::new(hud_x + pad_x, y, hud_w - 2.0 * pad_x, 16.0), &bottom_style);
 }
 
 /// DWM's (refreshes, frames composed, frames missed) counters, if available.

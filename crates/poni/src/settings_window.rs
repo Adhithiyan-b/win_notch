@@ -280,6 +280,7 @@ pub enum Key {
     HoverDelay,
     CloseDelay,
     Width,
+    Motion,
     Display,
     Fullscreen,
     GameStats,
@@ -499,6 +500,7 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                         item(Key::HoverDelay, "Opens after", Some("How long the pointer rests on the island first"), Ctl::Choice(names(&HOVER), nearest(&HOVER, s.hover_delay_ms))),
                         item(Key::CloseDelay, "Closes", Some("Once the pointer leaves the open island"), Ctl::Choice(names(&CLOSE), nearest(&CLOSE, s.collapse_delay_ms))),
                         item(Key::Width, "Width when open", Some("Wider gives the pages more room"), Ctl::Stepper(format!("{:.0}", s.expanded_width))),
+                        item(Key::Motion, "Motion mode", Some("Full physics springs or fast critically damped transitions"), Ctl::Choice(vec!["Full (Springs)", "Reduced"], match s.motion { poni_core::settings::MotionMode::Full => Some(0), poni_core::settings::MotionMode::Reduced => Some(1) })),
                     ],
                 ),
                 Block::Group(Some("Where it shows"), shows),
@@ -736,6 +738,11 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
             _ => return,
         },
         Key::Width => s.expanded_width = (s.expanded_width + step as f32 * WIDTH_STEP).clamp(480.0, 900.0),
+        Key::Motion => match act {
+            Act::Pick(0) => s.motion = poni_core::settings::MotionMode::Full,
+            Act::Pick(1) => s.motion = poni_core::settings::MotionMode::Reduced,
+            _ => return,
+        },
         Key::Display => match act {
             Act::Pick(i) if i < DISPLAYS.len() => s.monitor = DISPLAYS[i].0,
             _ => return,
