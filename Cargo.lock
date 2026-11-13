@@ -519,6 +519,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "dynamic-notch"
+version = "0.2.30"
+dependencies = [
+ "block2",
+ "dispatch2",
+ "embed-resource",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-avf-audio",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-location",
+ "objc2-core-text",
+ "objc2-foundation",
+ "objc2-quartz-core",
+ "p256",
+ "poni-core",
+ "serde",
+ "serde_json",
+ "studio-diorama",
+ "studio-usage",
+ "windows 0.58.0",
+ "windows-core 0.58.0",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1137,32 +1163,6 @@ dependencies = [
  "cpufeatures",
  "opaque-debug",
  "universal-hash",
-]
-
-[[package]]
-name = "poni"
-version = "0.2.30"
-dependencies = [
- "block2",
- "dispatch2",
- "embed-resource",
- "objc2",
- "objc2-app-kit",
- "objc2-avf-audio",
- "objc2-core-foundation",
- "objc2-core-graphics",
- "objc2-core-location",
- "objc2-core-text",
- "objc2-foundation",
- "objc2-quartz-core",
- "p256",
- "poni-core",
- "serde",
- "serde_json",
- "studio-diorama",
- "studio-usage",
- "windows 0.58.0",
- "windows-core 0.58.0",
 ]
 
 [[package]]

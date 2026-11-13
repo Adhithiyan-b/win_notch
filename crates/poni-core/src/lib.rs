@@ -24,7 +24,6 @@ pub mod ielts;
 pub mod look;
 pub mod lrc;
 pub mod lrclib;
-pub mod mediaremote;
 pub mod notes;
 pub mod notifications;
 pub mod nowplaying;
@@ -56,3 +55,4 @@ pub mod urlenc;
 pub mod ytdlp;
 pub mod ytdlp_info;
 pub mod ytdlp_partial;
+
