@@ -566,51 +566,8 @@ fn flip(st: &mut AppState, sw: Switch, on: Option<bool>) {
 
 // ---------------------------------------------------------------- account
 
-pub(crate) fn draw_account(ui: &mut Ui, st: &mut AppState, r: Rect) {
-    let cy = r.center().y;
-    crate::oyen::app_icon(ui.c, Point::new(r.x + ICON / 2.0, cy), ICON);
-    match st.oyenza.link.clone() {
-        OyenzaLink::Off => {
-            let label = "Sign in with Oyenza";
-            let w = ui.pill_width(label, false, false);
-            let b = Rect::new(r.right() - w, cy - PILL_REGULAR / 2.0, w, PILL_REGULAR);
-            if ui.pill(wid("settings.sign-in"), b, label, None, PillStyle::Primary(OYENZA)).clicked {
-                st.cmd(Command::Oyenza(OyenzaCmd::SignIn));
-            }
-            account_text(ui, r, b.x, "Oyenza", "Sign in to see money in and bills due here.");
-        }
-        OyenzaLink::Connecting { code, until, .. } => {
-            let cancel_w = ui.pill_width("Cancel", false, true);
-            let cancel = Rect::new(r.right() - cancel_w, cy - PILL_SMALL / 2.0, cancel_w, PILL_SMALL);
-            if ui.pill(wid("settings.cancel"), cancel, "Cancel", None, PillStyle::Utility).clicked {
-                st.cmd(Command::Oyenza(OyenzaCmd::Cancel));
-            }
-            let show_w = ui.pill_width("Show code", false, true);
-            let show = Rect::new(cancel.x - PILL_GAP - show_w, cancel.y, show_w, PILL_SMALL);
-            if ui.pill(wid("settings.show-code"), show, "Show code", None, PillStyle::Primary(OYENZA)).clicked {
-                st.cmd(Command::SetPage(PageKind::Oyenza));
-            }
-            let line = format!("Code {code} · works for {}", oyenza::code_time_left(until - st.now));
-            account_text(ui, r, show.x, "Signing in to Oyenza", &line);
-        }
-        OyenzaLink::Connected { account } => {
-            let dis_w = ui.pill_width("Disconnect", false, true);
-            let dis = Rect::new(r.right() - dis_w, cy - PILL_SMALL / 2.0, dis_w, PILL_SMALL);
-            if ui.pill(wid("settings.disconnect"), dis, "Disconnect", None, PillStyle::Utility).clicked {
-                st.cmd(Command::Oyenza(OyenzaCmd::Disconnect));
-            }
-            // Sums and senders straight away on the island (off: they wait for Show).
-            let label = "Show amounts";
-            let lw = ui.c.measure(label, &TextStyle::body(), 300.0).0.ceil();
-            let row = Rect::new(dis.x - 2.0 * ROW_BLEED - lw - 10.0 - SWITCH_W, cy - ROW_H / 2.0, lw + 10.0 + SWITCH_W, ROW_H);
-            let on = st.settings.oyenza_show_amounts;
-            if switch_row(ui, wid("settings.amounts"), row, label, Some(on), st.accent) {
-                st.settings.oyenza_show_amounts = !on;
-                st.cmd(Command::SaveSettings);
-            }
-            account_text(ui, r, row.x - ROW_BLEED, "Oyenza", &format!("Signed in as {account}"));
-        }
-    }
+pub(crate) fn draw_account(ui: &mut Ui, _st: &mut AppState, r: Rect) {
+    account_text(ui, r, r.right(), "Dynamic Notch", &format!("Version {}", crate::version::VERSION));
 }
 
 /// The account's name over one dim line, between Oyen and `right` (where

@@ -107,17 +107,12 @@ pub enum PageKind {
 impl PageKind {
     /// The tab row's order: the island's own pages, Oyenza, then the
     /// add-ons' pages and the "+".
-    pub const ALL: [PageKind; 20] = [
+    pub const ALL: [PageKind; 15] = [
         PageKind::Media,
         PageKind::Today,
         PageKind::Shelf,
         PageKind::Tasks,
         PageKind::Focus,
-        PageKind::Ai,
-        PageKind::Oyenza,
-        PageKind::Health,
-        PageKind::Ielts,
-        PageKind::Notes,
         PageKind::System,
         PageKind::Script,
         PageKind::Record,

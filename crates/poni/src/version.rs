@@ -10,7 +10,7 @@ const COMMIT: &str = env!("PONI_BUILD_COMMIT");
 /// The UTC day a CI build was made, "25 Oct 2026"; empty for a local build.
 const DAY: &str = env!("PONI_BUILD_DAY");
 
-/// "About Oyenza Studio 0.2.3 (25 Oct 2026)"; a test build adds its commit.
+/// "About Dynamic Notch 0.2.3 (25 Oct 2026)"; a test build adds its commit.
 pub fn about_label() -> String {
     label(VERSION, KIND, COMMIT, DAY)
 }
@@ -27,7 +27,7 @@ fn label(version: &str, kind: &str, commit: &str, day: &str) -> String {
         "test" => format!("test build {commit}, {day}"),
         _ => "local build".to_string(),
     };
-    if detail.is_empty() { format!("About Oyenza Studio {version}") } else { format!("About Oyenza Studio {version} ({detail})") }
+    if detail.is_empty() { format!("About Dynamic Notch {version}") } else { format!("About Dynamic Notch {version} ({detail})") }
 }
 
 fn url(version: &str, kind: &str, commit: &str) -> String {

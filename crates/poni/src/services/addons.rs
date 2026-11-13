@@ -332,78 +332,10 @@ fn ensure(shared: &Shared, client: &Client, sink: &EventSink, dir: &Path, addon:
             crate::pwarn!("add-ons: {}: {} can't be made runnable ({e})", addon.id, f.name);
         }
     }
-    let mut done = total - missing.iter().map(|f| f.size).sum::<u64>();
     if !missing.is_empty() {
-        if let Err(e) = fs::create_dir_all(&folder) {
-            crate::pwarn!("add-ons: {}: could not make {} ({e})", addon.id, folder.display());
-            sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
-            return Have::Failed;
-        }
-        sink.send(AppEvent::Addon { id: addon.id, status: Status::Downloading { done, total } });
-    }
-    for file in missing {
-        // Switched off meanwhile, or Pro went: stop here (the caller deletes
-        // the files, or leaves them for Pro).
-        let wants = {
-            let q = shared.lock();
-            wanted(addon, q.want.get(addon.id).copied().unwrap_or(false), q.pro)
-        };
-        if wants != Some(true) {
-            return Have::Unknown;
-        }
-        let url = addon.url(file);
-        let base = done;
-        let progress_sink = sink.clone();
-        let mut last = Instant::now();
-        let id = addon.id;
-        let started = Instant::now();
-        let got = client.get_bytes(&url, file_timeout(file.size), file.size + 64 * 1024, move |n| {
-            if last.elapsed() >= PROGRESS_EVERY {
-                last = Instant::now();
-                progress_sink.send(AppEvent::Addon { id, status: Status::Downloading { done: base + n.min(file.size), total } });
-            }
-        });
-        match got {
-            Ok((200, bytes)) if file.matches(&bytes) => {
-                let path = folder.join(file.name);
-                let part = folder.join(format!("{}.part", file.name));
-                let saved = fs::write(&part, &bytes).and_then(|_| if runs(addon, file) { make_runnable(&part) } else { Ok(()) }).and_then(|_| fs::rename(&part, &path));
-                if let Err(e) = saved {
-                    let _ = fs::remove_file(&part);
-                    crate::pwarn!("add-ons: {}: could not save {} ({e})", addon.id, file.name);
-                    sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
-                    return Have::Failed;
-                }
-                // Checked once more as saved (just written, so from the
-                // system's cache): the stamp only vouches for a file on disk
-                // that was read in full.
-                if !present(&path, file, "", &mut lines) {
-                    crate::pwarn!("add-ons: {}: {} isn't the same once saved", addon.id, file.name);
-                    sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
-                    return Have::Failed;
-                }
-                done += file.size;
-                crate::pinfo!("add-ons: {}: {} downloaded ({} bytes, {} ms)", addon.id, file.name, file.size, started.elapsed().as_millis());
-                sink.send(AppEvent::Addon { id: addon.id, status: Status::Downloading { done, total } });
-            }
-            Ok((200, bytes)) => {
-                crate::pwarn!("add-ons: {}: {} came back different ({} bytes, expected {}); not saved", addon.id, file.name, bytes.len(), file.size);
-                sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
-                return Have::Failed;
-            }
-            // GitHub busy or limiting: like no internet, try again later.
-            Ok((status, _)) if status >= 500 || status == 429 || status == 408 => return wait_retry(sink, addon, backoff, &format!("HTTP {status}")),
-            Ok((status, _)) => {
-                crate::pwarn!("add-ons: {}: {} answered HTTP {status}", addon.id, file.name);
-                sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
-                return Have::Failed;
-            }
-            Err(e @ (FetchError::Network(_) | FetchError::Timeout)) => return wait_retry(sink, addon, backoff, &e.to_string()),
-            Err(e) => {
-                crate::pwarn!("add-ons: {}: {} failed ({e})", addon.id, file.name);
-                return wait_retry(sink, addon, backoff, &e.to_string());
-            }
-        }
+        crate::pinfo!("add-ons: {}: {} local file(s) missing; remote downloading is disabled", addon.id, missing.len());
+        sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
+        return Have::Failed;
     }
     save_stamp(&folder, &stamp, &mut lines);
     clear_old_versions(dir, addon);

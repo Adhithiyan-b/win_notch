@@ -34,7 +34,7 @@ impl Tray {
                 hIcon: icon,
                 ..Default::default()
             };
-            let tip: Vec<u16> = format!("Oyenza Studio {}", crate::version::VERSION).encode_utf16().collect();
+            let tip: Vec<u16> = format!("Dynamic Notch {}", crate::version::VERSION).encode_utf16().collect();
             nid.szTip[..tip.len()].copy_from_slice(&tip);
             if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
                 return Err(windows::core::Error::from_win32());
@@ -140,8 +140,6 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         MenuItem::Separator,
         item("Synced lyrics", MenuCmd::ToggleLyrics, s.lyrics),
         item("Lyrics pronunciation (romaji, pinyin, Korean)", MenuCmd::TogglePronunciation, s.lyrics_pronunciation),
-        apple_music_menu(),
-        oyenza_menu(s, oyenza),
         item("Sounds", MenuCmd::ToggleSounds, s.sounds),
         MenuItem::Sub {
             label: "In full-screen apps".into(),
@@ -162,7 +160,7 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         // Which version and build this is, as the Mac menu says it.
         item(&crate::version::about_label(), MenuCmd::About, false),
         MenuItem::Separator,
-        item("Quit Oyenza Studio", MenuCmd::Quit, false),
+        item("Quit Dynamic Notch", MenuCmd::Quit, false),
     ];
     // Only once the island was dragged off the middle: the way back, under Keep island open.
     if s.island_x.is_some() {

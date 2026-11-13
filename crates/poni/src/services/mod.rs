@@ -88,10 +88,10 @@ impl Services {
         let audio = started("audio", audio::AudioService::start(sink.clone()));
         let bluetooth = started("bluetooth", bluetooth::BluetoothService::start(sink.clone()));
         let fullscreen = started("fullscreen", fullscreen::FullscreenWatcher::start(helper, sink.clone()));
-        // Idle (no calls) until the person signs in to Oyenza from the tray.
-        let oyenza = started("oyenza", oyenza::OyenzaService::start(sink.clone(), activity));
-        // Asks nothing until a phone is paired.
-        let pairdrop = started("pair drop", pairdrop::PairDropService::start(sink.clone()));
+        // Upstream Oyenza backend disabled (no telemetry/remote account infrastructure).
+        let oyenza = None;
+        // Upstream PairDrop meeting server disabled.
+        let pairdrop = None;
         // Asleep unless an add-on is on; then it only checks the files it has.
         // The Microsoft Store build has no Downloader, whatever settings.json says.
         // A Studio Pro add-on's files wait for Pro (`set_pro`): a filter here
@@ -203,21 +203,13 @@ impl Services {
     /// What the AI tab and its heads-up notices want (`App::set_usage_watch`).
     /// The worker's thread starts the first time either wants it and sleeps
     /// whenever neither does.
-    pub fn usage_watch(&self, w: usage::Watch) {
-        if !(w.open || w.notices) && self.usage.get().is_none() {
-            return;
-        }
-        if let Some(s) = self.usage.get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone()))) {
-            s.set_watch(w);
-        }
+    pub fn usage_watch(&self, _w: usage::Watch) {
+        // Disabled: talks to inference.oyenza.com / api.z.ai
     }
 
-    /// Something the AI tab asked its worker for (a key, a refresh, the
-    /// inference.oyenza.com link): it starts the thread if need be.
-    pub fn usage_cmd(&self, c: UsageCmd) {
-        if let Some(s) = self.usage.get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone()))) {
-            s.command(c);
-        }
+    /// Something the AI tab asked its worker for (disabled).
+    pub fn usage_cmd(&self, _c: UsageCmd) {
+        // Disabled: talks to inference.oyenza.com / api.z.ai
     }
 
     /// Show a pairing QR code: the link, or a sentence for the panel.

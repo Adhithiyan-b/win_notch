@@ -791,11 +791,8 @@ impl App {
             }
             self.try_add_tray();
             services::power::register_session(self.helper);
-            if !crate::autostart::packaged() {
-                self.updater = Some(crate::updates::Updater::start(paths::data_dir().join("update.json"), &mut self.st, crate::updates::unix_now()));
-                self.schedule_update();
-                self.fetch_setup();
-            }
+            // Remote auto-updater disabled for zero unsolicited network calls.
+            self.updater = None;
         }
         if let Err(e) = dragdrop::register(self.hwnd, self.sink.clone()) {
             pwarn!("drop target registration failed: {e}");
@@ -2837,6 +2834,9 @@ impl App {
     }
 
     fn collapse(&mut self) {
+        if self.phone.is_some() {
+            self.close_phone();
+        }
         if self.expanded {
             self.expanded = false;
             if self.text_focus {
@@ -4741,6 +4741,9 @@ impl App {
     }
 
     fn set_page(&mut self, p: PageKind) {
+        if p != PageKind::Shelf && self.phone.is_some() {
+            self.close_phone();
+        }
         if p != self.st.page {
             self.st.page = p;
             self.st.ui.addon_about = None;

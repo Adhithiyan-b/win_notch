@@ -333,11 +333,6 @@ impl Worker {
             // Nothing to search for; answer so the UI doesn't sit on "loading".
             return Ok(LyricsResult::NotFound);
         }
-        if self.apple.enabled() {
-            if let Some(result) = self.lookup_apple(job, &q)? {
-                return Ok(result);
-            }
-        }
         self.lookup_lrclib(job, &q)
     }
 
