@@ -136,8 +136,14 @@ impl Island {
         let growing = self.tune();
         self.aim();
         if self.reduced_motion {
-            self.fade_in_at = None;
-            self.content.set_target(1.0);
+            if new_content {
+                // Crossfade starts immediately with a fast critically damped spring
+                self.content.snap(0.0);
+                self.content.set_target(1.0);
+                self.fade_in_at = None;
+            } else {
+                self.content.set_target(1.0);
+            }
         } else if new_content {
             self.content.snap(0.0);
             self.fade_in_at = Some(now + if growing { FADE_DELAY_GROW } else { FADE_DELAY_SHRINK });
@@ -150,12 +156,12 @@ impl Island {
         let g = self.target;
         let growing = g.w * g.h > self.w.value * self.h.value;
         if self.reduced_motion {
-            // Critically damped transitions (zeta = 1.0):
-            // k = 750, c = 2 * sqrt(750) = 54.77 ~= 54.8
-            self.w.retune(750.0, 54.8);
-            self.h.retune(750.0, 54.8);
-            self.r.retune(750.0, 54.8);
-            self.content.retune(850.0, 58.3);
+            // Short critically damped transitions (~120-150 ms, zeta = 1.0):
+            // k = 20000.0, c = 2 * sqrt(20000) ~= 282.8
+            self.w.retune(20000.0, 282.8);
+            self.h.retune(20000.0, 282.8);
+            self.r.retune(20000.0, 282.8);
+            self.content.retune(4000.0, 126.5);
             self.floor_w = None;
             self.floor_h = None;
             return growing;
@@ -618,22 +624,45 @@ mod tests {
     }
 
     #[test]
-    fn reduced_motion_uses_critically_damped_springs_and_instant_content() {
+    fn reduced_motion_uses_critically_damped_springs_and_quick_crossfade() {
         let mut i = Island::new(PILL);
         i.set_reduced_motion(true);
         assert!(i.is_reduced_motion());
-        i.set_target(CARD, 0.0, false);
-        assert_eq!(tuning(&i.w), (750.0, 54.8));
-        assert_eq!(tuning(&i.h), (750.0, 54.8));
-        assert_eq!(tuning(&i.r), (750.0, 54.8));
-        assert_eq!(tuning(&i.content), (850.0, 58.3));
+
+        // Test morph with new content: quick crossfade (fade_in_at set), animated not instant snap
+        i.set_target(CARD, 0.0, true);
+        assert_eq!(tuning(&i.w), (20000.0, 282.8));
+        assert_eq!(tuning(&i.h), (20000.0, 282.8));
+        assert_eq!(tuning(&i.r), (20000.0, 282.8));
+        assert_eq!(tuning(&i.content), (4000.0, 126.5));
+        assert_eq!(i.content.value, 0.0);
         assert_eq!(i.content.target, 1.0);
-        assert_eq!(i.fade_in_at, None);
+
+        // Settle time is short (~120-150 ms) and critically damped (no overshoot)
         let mut max_w: f32 = 0.0;
         let t = run(&mut i, 240.0, 1.0, |i| {
             max_w = max_w.max(i.current().w);
         });
-        assert!(t < 0.60, "reduced motion should settle in <600ms, took {t}s");
+        assert!(t >= 0.12 && t <= 0.17, "reduced motion should settle in ~120-150ms, took {t:.3}s");
         assert!(max_w <= CARD.w + 1e-4, "critically damped spring must not overshoot");
+        assert!(i.settled());
+        assert_eq!(i.content_alpha(), 1.0);
+
+        // Test interruptibility mid-animation: retarget preserves velocity
+        let mut i2 = Island::new(PILL);
+        i2.set_reduced_motion(true);
+        i2.set_target(CARD, 0.0, false);
+        // Step halfway (around 60 ms)
+        for k in 0..15 {
+            i2.step(1.0 / 240.0, k as f64 / 240.0);
+        }
+        let vel = i2.w.velocity;
+        assert!(vel > 100.0, "should have positive velocity mid-expansion: {vel}");
+        // Retarget back to PILL mid-flight
+        i2.set_target(PILL, 15.0 / 240.0, false);
+        assert_eq!(i2.w.velocity, vel, "interrupting must preserve velocity");
+        let t2 = run(&mut i2, 240.0, 1.0, |_| {});
+        assert!(t2 < 0.20, "settled smoothly back to pill in {t2:.3}s");
+        assert_eq!(i2.current().w, PILL.w);
     }
 }
