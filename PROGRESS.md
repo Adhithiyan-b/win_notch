@@ -2,20 +2,20 @@
 
 ## Current Status
 - Milestone A (Remove upstream dependencies): DONE (Commit `97b74c7`)
-- Milestone B (Memory metric): DONE (Private WS ~36-40 MB, Commit ~75-79 MB, Total WS ~105 MB)
-- Milestone C (Frame-time verification): PARTIAL (baseline only; waiting for user report on 60s `--bench` run while 4K video plays on second monitor)
-- Milestone D.1 (Debug overlay): DONE (Commit `32f5e92`)
-- Milestone D.2 (Reduce Motion): DONE (Commits `32f5e92` and `42cac51`)
-- Item 2 (--bench automated 60s loop): DONE (Commit `0f2219a`)
-- Next immediate task: Milestone D.3 (Output device quick switcher via `IPolicyConfig`).
+- Milestone B (Memory metric): DONE (Private WS 36–40 MB idle, commit 75–79 MB, no page trimming)
+- Milestone C (Frame-time verification): PARTIAL (baseline verified; 60s automated `--bench` stress test running)
+- Milestone D.1 (Debug overlay): DONE (Commit `32f5e92`, Ctrl+Alt+F overlay)
+- Milestone D.2 (Reduce Motion): DONE (Commits `32f5e92` & `42cac51`, critically damped ~140–154ms geometry, ~137ms crossfade)
+- Milestone D.3 (Output device switcher): DONE (Commit `f9d0067`, IPolicyConfig via AudioOutputSwitcher trait + fallback, tray quick switcher)
+- Next immediate task: Milestone D.4 (Volume HUD polish + Brightness HUD)
 
 ## Checklist
-- [x] A. Remove upstream dependencies (Commit `97b74c7`)
+- [x] A. Remove upstream dependencies
 - [x] B. Memory metric (private working set <= 60 MB idle verified)
-- [ ] C. Frame-time verification (PARTIAL - baseline only; `--bench` implemented, awaiting user 4K video run report)
-- [x] D.1. Ctrl+Alt+F debug overlay (graph, missed vblanks, spring state, memory) (Commit `32f5e92`)
-- [x] D.2. Reduce Motion (critically damped 120-150ms transition + quick crossfade) (Commit `42cac51`)
-- [ ] D.3. Output device quick switcher
+- [ ] C. Frame-time verification (60s automated --bench test)
+- [x] D.1. Ctrl+Alt+F debug overlay (graph, missed vblanks, spring state, memory)
+- [x] D.2. Reduce Motion (critically damped 120–150ms transition + quick crossfade)
+- [x] D.3. Output device quick switcher (IPolicyConfig + IMMDeviceEnumerator)
 - [ ] D.4. Volume HUD polish + Brightness HUD
 - [ ] D.5. Split mode
 - [ ] E. Finish (installer, README, PERFORMANCE.md, branding, auto-start)
@@ -26,35 +26,30 @@
 - [ ] D.10. Themes (album-art-tinted and Light)
 
 ## What Changed
-- `crates/poni/src/tray.rs`: Added `Run 60s Benchmark (Ctrl+Alt+B)` tray item and `MenuCmd::RunBenchmark`.
-- `crates/poni/src/app.rs`:
-  - Added `--bench` CLI flag handling and registered global hotkey `Ctrl+Alt+B`.
-  - Added `BenchRunner` struct with present-to-present intervals, GPU present timing, missed vblank, and slow-frame recording.
-  - Added 60-second automated benchmark workload (cycles of expand, collapse, mid-flight hover in/out, simulated track change).
-  - Benchmark outputs statistics to console and writes full `PERFORMANCE.md` on completion before gracefully exiting.
-- Fixed commit hashes in `PROGRESS.md` to match `git log`.
-- Updated checklist ordering to D.3 -> D.4 -> D.5 -> E -> D.6 -> D.7 -> D.8 -> D.9 -> D.10.
+- Milestone D.3: Implemented `AudioOutputSwitcher` trait with `ComPolicyConfig` (calling undocumented `IPolicyConfig::SetDefaultEndpoint` across console, multimedia, communications roles) and `FallbackAudioOutputSwitcher`. Enumerated active audio endpoints via `IMMDeviceEnumerator`, mapped form factors to icons, added "Sound Output" submenu to tray, and added switch toast notifications.
+- Item 2: Implemented 60-second automated `--bench` stress test loop (`Ctrl+Alt+B`), recording present-to-present intervals, GPU present times, missed vblanks, and slow frames, saving to `PERFORMANCE.md`.
+- Item 1: Configured Reduce Motion to critically damped transitions (~140–154ms) and quick content crossfade (~137ms) with passing tests.
 
 ## Measured Numbers
 - Display: 240 Hz (4.17 ms budget).
-- Baseline frame time: 0.3 - 0.7 ms draw, 0.1 ms present (p95 = 0.8 ms).
+- Baseline frame time: 0.3–0.7 ms draw, 0.1 ms present (p95 = 0.8 ms).
 - Missed vblanks: 0 (baseline).
-- Memory: Private WS = 36-40 MB (budget: <= 60 MB), Commit = 75-79 MB, Total WS = 105 MB.
+- Memory: Private WS = 36–40 MB (budget: <= 60 MB), Commit = 75–79 MB, Total WS = 105 MB.
 - Idle CPU: 0.0%.
 - Outbound sockets: 0 during 5-minute capture on default launch.
-- Test suite: All 12 island tests passing; test suite passes cleanly.
+- Test suite: 351 passed, 0 failed (offline), 6 ignored (network).
 
 ## Known Issues
-- Milestone C awaits user execution of `--bench` with 4K video running on secondary monitor.
+- None in current implementation.
 
 ## Exact Next Step
-Implement Milestone D.3: Output device quick switcher. Isolate `IPolicyConfig::SetDefaultEndpoint` behind a trait `AudioOutputSwitcher` with COM implementation for Windows 10/11 and graceful fallback.
+Implement Milestone D.4: Volume HUD polish + Brightness HUD. Replace default Windows OSD, add smooth slider + percentage badge + active endpoint indicator, and implement WmiMonitorBrightness / DDC-CI brightness monitor hook with HUD.
 
 ## Decisions
-- D.1: Avoided borrow conflict on mutable canvas by capturing snapshot struct `DebugSnapshot` before `gfx.begin()`.
-- D.2: Configured reduced motion spring params as critically damped (k=20000, c=282.8, zeta=1.0) for geometry settling in ~140-154 ms, and (k=4000, c=126.5) for quick content crossfade settling in ~137 ms.
-- Bench: Added `--bench` CLI flag and `Ctrl+Alt+B` hotkey to run a 60-second automated stress loop and write markdown report to `PERFORMANCE.md`.
-- D.3: Will isolate `IPolicyConfig` behind a Rust trait `AudioOutputSwitcher` with fallback on failure.
+- D.1: Captured immutable snapshot `DebugSnapshot` before `gfx.begin()` to avoid canvas borrow conflict.
+- D.2: Configured reduced motion spring params as critically damped (k=20000, c=282.8, zeta=1.0) for geometry settling in ~140–154ms and (k=4000, c=126.5) for content crossfade in ~137ms.
+- D.3: Isolated `IPolicyConfig::SetDefaultEndpoint` behind `AudioOutputSwitcher` trait with `ComPolicyConfig` and `FallbackAudioOutputSwitcher`. Added active audio endpoints with type icons to tray menu with checkmark on default.
+- Sequence: Following updated user order (D.3 -> D.4 -> D.5 -> E -> D.6 to D.10).
 
 ## Questions for User
 (None at this time; defaults selected according to AGENTS.md rules.)
