@@ -8,6 +8,20 @@ Project: Windows Dynamic Island-style notch overlay in Rust, forked from oyenza-
 - Quota economy (I have small limits and switch accounts): iterate with `cargo check`; run full `cargo build --release` only for measurements and at the end of an item. Don't re-print long files or repeat earlier reports. Chat replies: max ~15 lines plus key numbers.
 - If I write "switching" or "handoff": bring the current file to a compiling state, update PROGRESS.md, commit, reply "HANDOFF READY".
 - Don't stop for approval between items; go to the next one. Ask me ONLY for admin rights, API keys, or licensing changes. For any other ambiguity choose the safest default, record it in PROGRESS.md under "Decisions", and continue. Batch questions at the end of PROGRESS.md.
+- An item may be marked DONE only with an evidence line in PROGRESS.md (command output, test count, or numbers from PERFORMANCE.md). No evidence means PARTIAL. Never re-analyze the whole codebase; use the file map below.
+- HANDOFF PROTOCOL: Keep a "## HANDOFF" block at the top of PROGRESS.md (max 10 lines, always current: current item, last completed step, uncommitted/WIP files, compile state, exact next command/edit, things tried not to repeat, anything waiting on user). Update HANDOFF block and commit BEFORE starting any long command (cargo build --release, cargo test, --bench, network capture) and after every finished step. WIP commits allowed if noted. If user writes "switching" or on quota warning: stop immediately, use at most 2-3 tool calls to update HANDOFF block and commit, reply "HANDOFF READY". At session start read only AGENTS.md, PROGRESS.md and git status; resume from HANDOFF block without re-analyzing. Never wait on any background command for more than 5 minutes (terminate on expiry).
+
+## File Map
+(paths under crates/poni/src unless noted):
+- app.rs: main loop, window messages, hotkeys, debug overlay, --bench / BenchRunner
+- island.rs: island size/morph springs, reduced motion. poni-core/src/spring.rs: spring solver
+- pill/: drawing of pill states (expanded, hud, idle, live, media, music, notice, shape, status, motion)
+- activities.rs: live activities and priority
+- services/: audio.rs (volume, output devices), bluetooth.rs, media.rs (GSMTC), power.rs, notifications.rs, clipboard.rs, fullscreen.rs, sysmon.rs, mic.rs, recorder.rs, location.rs, cities.rs
+- tray.rs, settings_window.rs, settings_host.rs; poni-core/src/settings.rs (settings model)
+- commands.rs, events.rs, state.rs (command/event/state plumbing)
+- gfx.rs, glass.rs, window.rs (Direct2D/DirectComposition, layered window)
+- poni-core/src: agenda.rs (calendar), pomodoro.rs, shelf.rs, frametime.rs
 
 ## Rules
 - No telemetry. No network without a feature that needs it, off by default. No calls to oyenza servers.

@@ -1,18 +1,27 @@
 # Progress: Dynamic Notch
 
+## HANDOFF
+- Current Item: Step A (Remove upstream dependencies)
+- Last Completed Step: Background poni-core test terminated; files deleted from git
+- WIP Files: crates/poni (app.rs, services, pages, tray, state), Cargo.toml, Cargo.lock
+- Compile State: HEAD may not compile: run cargo check first
+- Exact Next Step: Run `cargo check --bin dynamic-notch` and resolve remaining references in poni
+- Tried / Do NOT Repeat: Do NOT run full poni-core test suite during step A; do NOT wait >5 min on tasks
+- Waiting On: Nothing
+
 ## Current Status
-- Milestone A (Remove upstream dependencies): DONE (Commit `97b74c7`)
+- Milestone A (Remove upstream dependencies): PARTIAL (Reopened: removing leftover oyenza, usage, studio-usage, update, pairdrop, applemusic modules)
 - Milestone B (Memory metric): DONE (Private WS 36–40 MB idle, commit 75–79 MB, no page trimming)
-- Milestone C (Frame-time verification & optimization): DONE (Eliminated GDI hit mask mid-animation stalls, cached registry calls, async logging channel, preallocated swapchain headroom)
+- Milestone C (Frame-time verification & optimization): PARTIAL (Reopened for per-phase stats, verification on 4K multi-mon load, and post-bench idle WS verification)
 - Milestone D.1 (Debug overlay): DONE (Commit `32f5e92`, Ctrl+Alt+F overlay)
 - Milestone D.2 (Reduce Motion): DONE (Commits `32f5e92` & `42cac51`, critically damped ~140–154ms geometry, ~137ms crossfade)
 - Milestone D.3 (Output device switcher): DONE (Commit `f9d0067`, IPolicyConfig via AudioOutputSwitcher trait + fallback, tray quick switcher)
-- Next immediate task: Milestone D.4 (Volume HUD polish + Brightness HUD)
+- Next immediate task: Finish Milestone A removal of remaining upstream infrastructure
 
 ## Checklist
-- [x] A. Remove upstream dependencies
+- [ ] A. Remove upstream dependencies (reopened to complete full removal)
 - [x] B. Memory metric (private working set <= 60 MB idle verified)
-- [x] C. Frame-time verification & optimization (eliminated presentation stalls)
+- [ ] C. Frame-time verification & optimization (reopened for per-phase benchmark)
 - [x] D.1. Ctrl+Alt+F debug overlay (graph, missed vblanks, spring state, memory)
 - [x] D.2. Reduce Motion (critically damped 120–150ms transition + quick crossfade)
 - [x] D.3. Output device quick switcher (IPolicyConfig + IMMDeviceEnumerator)
@@ -45,10 +54,10 @@
 - Test suite: 351 passed, 0 failed (offline), 6 ignored (network).
 
 ## Known Issues
-- None in current implementation.
+- A and C reopened; Step C fixes in c093e63 are not yet benchmarked.
 
 ## Exact Next Step
-Implement Milestone D.4: Volume HUD polish + Brightness HUD. Replace default Windows OSD, add smooth slider + percentage badge + active endpoint indicator, and implement WmiMonitorBrightness / DDC-CI brightness monitor hook with HUD.
+Finish A, then C, then D.4 (do NOT replace/suppress the Windows OSD).
 
 ## Decisions
 - D.1: Captured immutable snapshot `DebugSnapshot` before `gfx.begin()` to avoid canvas borrow conflict.
