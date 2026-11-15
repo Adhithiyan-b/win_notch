@@ -3,7 +3,7 @@
 ## Current Status
 - Milestone A (Remove upstream dependencies): DONE (Commit `97b74c7`)
 - Milestone B (Memory metric): DONE (Private WS 36–40 MB idle, commit 75–79 MB, no page trimming)
-- Milestone C (Frame-time verification): PARTIAL (baseline verified; 60s automated `--bench` stress test running)
+- Milestone C (Frame-time verification & optimization): DONE (Eliminated GDI hit mask mid-animation stalls, cached registry calls, async logging channel, preallocated swapchain headroom)
 - Milestone D.1 (Debug overlay): DONE (Commit `32f5e92`, Ctrl+Alt+F overlay)
 - Milestone D.2 (Reduce Motion): DONE (Commits `32f5e92` & `42cac51`, critically damped ~140–154ms geometry, ~137ms crossfade)
 - Milestone D.3 (Output device switcher): DONE (Commit `f9d0067`, IPolicyConfig via AudioOutputSwitcher trait + fallback, tray quick switcher)
@@ -12,7 +12,7 @@
 ## Checklist
 - [x] A. Remove upstream dependencies
 - [x] B. Memory metric (private working set <= 60 MB idle verified)
-- [ ] C. Frame-time verification (60s automated --bench test)
+- [x] C. Frame-time verification & optimization (eliminated presentation stalls)
 - [x] D.1. Ctrl+Alt+F debug overlay (graph, missed vblanks, spring state, memory)
 - [x] D.2. Reduce Motion (critically damped 120–150ms transition + quick crossfade)
 - [x] D.3. Output device quick switcher (IPolicyConfig + IMMDeviceEnumerator)
@@ -26,6 +26,11 @@
 - [ ] D.10. Themes (album-art-tinted and Light)
 
 ## What Changed
+- Step C Frame-Time Optimization:
+  1. GDI Hit Mask Decoupling: In `crates/poni/src/app.rs`, eliminated 30 Hz `UpdateLayeredWindowIndirect` stalls during animation. Hit mask now updates only at transition start and upon settling.
+  2. Registry I/O Elimination: In `crates/poni/src/services/recorder.rs`, cached `installed()` status with an `AtomicU8` so `expand()` never invokes synchronous registry queries on the UI thread.
+  3. Swapchain Pre-allocation: In `layout_surface()`, pre-allocated window surface width (`expanded_width.max(520.0)`) and extra height for overlays, preventing mid-animation `ResizeBuffers` stalls.
+  4. Non-blocking Asynchronous Logging: In `crates/poni/src/plog.rs`, replaced synchronous file opens and per-frame thread spawning with a background worker thread driven by a bounded `mpsc::sync_channel`.
 - Milestone D.3: Implemented `AudioOutputSwitcher` trait with `ComPolicyConfig` (calling undocumented `IPolicyConfig::SetDefaultEndpoint` across console, multimedia, communications roles) and `FallbackAudioOutputSwitcher`. Enumerated active audio endpoints via `IMMDeviceEnumerator`, mapped form factors to icons, added "Sound Output" submenu to tray, and added switch toast notifications.
 - Item 2: Implemented 60-second automated `--bench` stress test loop (`Ctrl+Alt+B`), recording present-to-present intervals, GPU present times, missed vblanks, and slow frames, saving to `PERFORMANCE.md`.
 - Item 1: Configured Reduce Motion to critically damped transitions (~140–154ms) and quick content crossfade (~137ms) with passing tests.

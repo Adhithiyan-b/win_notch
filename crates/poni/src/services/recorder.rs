@@ -5,23 +5,38 @@
 //! [`installed`] is read at start, as the island opens and when the menu opens.
 
 use poni_core::recorder;
+use std::sync::atomic::{AtomicU8, Ordering};
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, GetMonitorInfoW, MonitorFromWindow, DISPLAY_DEVICEW, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, KEY_READ};
 
+static CACHED_INSTALLED: AtomicU8 = AtomicU8::new(0);
+
 /// Whether the recorder is installed: its installer registers the
 /// `oyenza-recorder:` link scheme (per user or for the machine; HKCR shows both).
+/// Cached in memory so expand animations never incur synchronous registry I/O.
 pub fn installed() -> bool {
+    match CACHED_INSTALLED.load(Ordering::Relaxed) {
+        1 => false,
+        2 => true,
+        _ => recheck_installed(),
+    }
+}
+
+pub fn recheck_installed() -> bool {
     let scheme = HSTRING::from(recorder::SCHEME);
     let mut key = HKEY::default();
-    if unsafe { RegOpenKeyExW(HKEY_CLASSES_ROOT, PCWSTR(scheme.as_ptr()), 0, KEY_READ, &mut key) }.is_err() {
-        return false;
-    }
-    unsafe {
-        let _ = RegCloseKey(key);
-    }
-    true
+    let res = if unsafe { RegOpenKeyExW(HKEY_CLASSES_ROOT, PCWSTR(scheme.as_ptr()), 0, KEY_READ, &mut key) }.is_err() {
+        false
+    } else {
+        unsafe {
+            let _ = RegCloseKey(key);
+        }
+        true
+    };
+    CACHED_INSTALLED.store(if res { 2 } else { 1 }, Ordering::Relaxed);
+    res
 }
 
 /// The Record page's Record: `target` (the screen the island is on, or a

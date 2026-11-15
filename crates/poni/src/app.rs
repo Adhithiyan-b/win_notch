@@ -946,7 +946,8 @@ impl App {
     /// start and whenever the scale, the monitor or the expanded width changes.
     fn layout_surface(&mut self) {
         let tallest = PageKind::ALL.iter().map(|p| pages::content_height(*p, &self.st)).fold(0.0f32, f32::max);
-        self.layout_surface_for(self.st.settings.expanded_width, pages::HEADER_H + tallest + pages::PAD);
+        let extra_h = if self.debug_overlay || self.bench.is_some() { 180.0 } else { 0.0 };
+        self.layout_surface_for(self.st.settings.expanded_width.max(520.0), pages::HEADER_H + tallest + pages::PAD + extra_h);
         // The band Step aside watches follows the monitor and its scale.
         self.sync_top_watch();
     }
@@ -1595,6 +1596,7 @@ impl App {
             }
             WM_HOTKEY if wp.0 == HOTKEY_DEBUG as usize => {
                 self.debug_overlay = !self.debug_overlay;
+                self.layout_surface();
                 self.request_frame();
                 Some(LRESULT(0))
             }
@@ -4171,18 +4173,20 @@ impl App {
         self.schedule_wake();
         if !self.log_queue.is_empty() {
             let lines = std::mem::take(&mut self.log_queue);
-            std::thread::spawn(move || lines.iter().for_each(|l| crate::plog::write("INFO", l)));
+            for l in &lines {
+                crate::plog::write("INFO", l);
+            }
         }
     }
 
     /// GPU renderer: keep the window's invisible hit mask on the island.
-    /// While the outline moves it follows at [`MASK_INTERVAL`]; at rest it
-    /// matches exactly.
+    /// At rest it matches exactly; during expand/collapse transitions it updates
+    /// on start and on settle to avoid GDI stalls mid-animation.
     fn update_hit_mask(&mut self, now: f64) {
         let mask = self.hit_mask();
         let due = match &self.mask {
             None => true,
-            Some((m, at)) => *m != mask && (self.island.settled() || now - at >= MASK_INTERVAL),
+            Some((m, _)) => *m != mask && (self.island.settled() || (self.expanded && m.rect.is_none())),
         };
         if !due {
             return;
@@ -5815,6 +5819,7 @@ impl App {
         pinfo!("Starting 60-second automated benchmark...");
         eprintln!("\n>>> STARTING 60-SECOND AUTOMATED BENCHMARK (expand, collapse, mid-flight hover in/out, simulated track change)...");
         self.bench = Some(BenchRunner::new());
+        self.layout_surface();
         self.request_frame();
     }
 
