@@ -2496,6 +2496,19 @@ impl App {
             RunBenchmark => {
                 self.start_bench();
             }
+            SwitchAudioOutput(id) => {
+                let switcher = services::audio::create_audio_output_switcher();
+                if let Err(e) = switcher.set_default_endpoint(&id) {
+                    perror!("failed to switch audio output: {e}");
+                } else {
+                    pinfo!("switched audio output to {id}");
+                    let devices = services::audio::list_output_devices();
+                    if let Some(dev) = devices.into_iter().find(|d| d.id == id) {
+                        self.st.notify(dev.icon, palette::BLUE, "Audio Output", &dev.name, 3.0, None);
+                        self.request_frame();
+                    }
+                }
+            }
             ToggleSystemHistory => s.system_history = !s.system_history,
             ToggleLyrics => s.lyrics = !s.lyrics,
             TogglePronunciation => s.lyrics_pronunciation = !s.lyrics_pronunciation,

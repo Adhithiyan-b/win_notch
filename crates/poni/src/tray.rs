@@ -51,13 +51,14 @@ impl Tray {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuCmd {
     ToggleIdleStyle(IdleStyle),
     SetTheme(Theme),
     ToggleMotion(MotionMode),
     ToggleDebugOverlay,
     RunBenchmark,
+    SwitchAudioOutput(String),
     ToggleSystemHistory,
     ToggleLyrics,
     TogglePronunciation,
@@ -153,6 +154,29 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         item("Synced lyrics", MenuCmd::ToggleLyrics, s.lyrics),
         item("Lyrics pronunciation (romaji, pinyin, Korean)", MenuCmd::TogglePronunciation, s.lyrics_pronunciation),
         item("Sounds", MenuCmd::ToggleSounds, s.sounds),
+    ];
+    // Sound Output quick switcher submenu
+    let audio_devices = crate::services::audio::list_output_devices();
+    if !audio_devices.is_empty() {
+        let sound_items: Vec<MenuItem> = audio_devices
+            .into_iter()
+            .map(|dev| {
+                let icon_str = match dev.icon {
+                    crate::icons::Icon::Headphones => "🎧 ",
+                    crate::icons::Icon::Bluetooth => "🔵 ",
+                    crate::icons::Icon::Screen => "🖥️ ",
+                    _ => "🔊 ",
+                };
+                MenuItem::Item {
+                    label: format!("{icon_str}{}", dev.name),
+                    cmd: MenuCmd::SwitchAudioOutput(dev.id),
+                    checked: dev.is_default,
+                }
+            })
+            .collect();
+        items.push(MenuItem::Sub { label: "Sound Output".into(), items: sound_items });
+    }
+    items.extend([
         MenuItem::Sub {
             label: "In full-screen apps".into(),
             items: vec![
@@ -173,7 +197,7 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         item(&crate::version::about_label(), MenuCmd::About, false),
         MenuItem::Separator,
         item("Quit Dynamic Notch", MenuCmd::Quit, false),
-    ];
+    ]);
     // Only once the island was dragged off the middle: the way back, under Keep island open.
     if s.island_x.is_some() {
         let at = items.iter().position(|i| matches!(i, MenuItem::Item { cmd: MenuCmd::TogglePinned, .. })).map_or(items.len(), |i| i + 1);
@@ -240,7 +264,7 @@ fn build(menu: HMENU, items: &[MenuItem], cmds: &mut Vec<MenuCmd>) {
         unsafe {
             match it {
                 MenuItem::Item { label, cmd, checked } => {
-                    cmds.push(*cmd);
+                    cmds.push(cmd.clone());
                     let id = cmds.len();
                     let w: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
                     let flags = MF_STRING | if *checked { MF_CHECKED } else { MF_UNCHECKED };
@@ -279,9 +303,9 @@ pub fn show_menu(owner: HWND, pt: POINT, items: &[MenuItem]) -> Option<MenuCmd> 
         let _ = PostMessageW(owner, WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         let idx = chosen.0 as usize;
-        let cmd = if idx == 0 { None } else { cmds.get(idx - 1).copied() };
+        let cmd = if idx == 0 { None } else { cmds.get(idx - 1).cloned() };
         let launches = matches!(
-            cmd,
+            cmd.as_ref(),
             Some(MenuCmd::ShowSettings | MenuCmd::OpenSettings | MenuCmd::OpenDataFolder | MenuCmd::About | MenuCmd::LyricsCredit | MenuCmd::AppleMusicHelp | MenuCmd::OyenzaOpen)
         );
         if !launches && !prev.is_invalid() && prev != owner && IsWindow(prev).as_bool() && GetForegroundWindow() == owner {
