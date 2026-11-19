@@ -5,7 +5,8 @@ Project: Windows Dynamic Island-style notch overlay in Rust, forked from oyenza-
 ## Session protocol
 - Start of session: read AGENTS.md and PROGRESS.md, run `git log -5`, continue with the first unchecked item. Never ask me to repeat anything that is in these files.
 - After EVERY completed item, or every ~20 minutes of work: update PROGRESS.md (status, what changed, measured numbers, known issues, exact next step) and `git commit`. Never leave a half-finished edit without a note in PROGRESS.md.
-- Quota economy (I have small limits and switch accounts): iterate with `cargo check`; run full `cargo build --release` only for measurements and at the end of an item. Don't re-print long files or repeat earlier reports. Chat replies: max ~15 lines plus key numbers.
+- Quota economy (I have small limits and switch accounts): iterate with `cargo check`; run full `cargo build --release` only for measurements and at the end of an item. Don't re-print long files or repeat earlier reports. Chat replies: max ~5 lines.
+- TOKEN RULES: No plans, narration, summaries or confirmations. Tool calls, then max 5 lines of reply. Never print compiler/test/bench output raw. Always filter: `cargo check --bin dynamic-notch 2>&1 | grep -E "^(error|warning: unused)" -A4 | head -50`. Test/bench output: `| tail -n 30`. Edit with targeted str_replace; never re-write or re-print whole files; read only lines needed (grep -n, view small range). Prefer deleting off-list code over repairing it. Don't add anything not on checklist. Never search /research or /target. Keep HANDOFF block current; commit before long commands; WIP commits allowed. On "switching": update HANDOFF, commit, reply "HANDOFF READY". Don't ask questions unless admin rights, API key, or licence change needed.
 - If I write "switching" or "handoff": bring the current file to a compiling state, update PROGRESS.md, commit, reply "HANDOFF READY".
 - Don't stop for approval between items; go to the next one. Ask me ONLY for admin rights, API keys, or licensing changes. For any other ambiguity choose the safest default, record it in PROGRESS.md under "Decisions", and continue. Batch questions at the end of PROGRESS.md.
 - An item may be marked DONE only with an evidence line in PROGRESS.md (command output, test count, or numbers from PERFORMANCE.md). No evidence means PARTIAL. Never re-analyze the whole codebase; use the file map below.
@@ -28,8 +29,14 @@ Project: Windows Dynamic Island-style notch overlay in Rust, forked from oyenza-
 - `cargo build --release` must pass at every commit (toolchain stable-x86_64-pc-windows-gnullvm + LLVM-MinGW).
 - Keep LICENSE, copyright headers and THIRD_PARTY_NOTICES.md. Only load add-ons from a local folder I choose; never download code.
 - If a feature can't work reliably on this machine, degrade gracefully and note it in PROGRESS.md.
+- Auto-hide & Fullscreen: in fullscreen, hide the notch by default, but add a "Show over games" setting that shows only a compact strip (FPS + mic-muted indicator) while a game is in front, and costs zero CPU when the game isn't running.
 - Animation: springs stay interruptible (velocity-preserving retarget). Before/after any animation change, measure real presentation on the 240 Hz display (DXGI frame stats / DwmGetCompositionTimingInfo: missed vblanks, present-to-present intervals, GPU time) during expand, collapse, rapid hover in/out, track change, and 4K video on another monitor. Target: no missed vblanks.
 - Memory: private working set ≤ 60 MB idle. Never use EmptyWorkingSet or page trimming. Cap thumbnail cache; pre-warm album-art textures when media starts.
+
+## Order and Execution Rules
+- Execution order is strict: A, C, D.4, D.5, D.6, D.7, D.8, D.9, D.10, then E LAST. Write "PROJECT COMPLETE" only after E.
+- Remove off-list leftovers instead of fixing them (settings and code): oyenza_show_amounts, usage/AI tab, prayer/sholat, caffeine, ja add-on, and anything else not on the checklist that blocks the build or touches the network.
+- D.11 NotchPixel parity: OPTIONAL, do last, only after E. We are NOT cloning NotchPixel; it was only a reference. Keep the "Show over games" setting; skip anything else from NotchPixel.
 
 ## Checklist (in order)
 A. Remove upstream dependencies: oyenza.rs, usage.rs (AI/LLM tab), update.rs/updates.rs, pairdrop.rs signaling, Apple Music token flow, related UI/settings; remove Oyenza/Poni branding (strings, resources, tray tooltip); disable remote add-on downloads; phonedrop socket open only while its panel is open. Then capture 5 minutes of real network traffic on a fresh default launch: expect zero connections. Re-check after any milestone that adds networking.
@@ -55,3 +62,4 @@ E. Finish:
   - PERFORMANCE.md (frame stats, private memory, idle CPU)
   - Final THIRD_PARTY_NOTICES.md check
   Then write "PROJECT COMPLETE" in PROGRESS.md.
+D.11. [OPTIONAL, after E] NotchPixel parity: check base FPS strip, global mic-mute hotkey with visible muted state, file shelf drag in/out. Fix only what is missing or broken. Don't add anything else.
