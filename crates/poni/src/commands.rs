@@ -1,7 +1,6 @@
 //! Side effects requested by pages; executed by the app after each frame.
 
 use crate::pages::PageKind;
-use studio_usage::ProviderId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MediaCmd {
@@ -34,43 +33,6 @@ pub enum PhoneCmd {
     Answer { id: u64, accept: bool },
 }
 
-/// Paired phones (also in the Shelf's phone panel; `services::pairdrop`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PairCmd {
-    /// Show a pairing QR code in the panel.
-    Begin,
-    /// Back to the same-Wi-Fi code (a pairing code stops working).
-    Back,
-    /// Show the paired phones.
-    List,
-    /// Forget a paired phone (by its room on the meeting server).
-    Remove(String),
-}
-
-/// Requests for the Oyenza worker (`services::oyenza`).
-#[derive(Clone, Debug, PartialEq)]
-pub enum OyenzaCmd {
-    /// Ask for a sign-in code to show.
-    SignIn,
-    /// Stop waiting for the code's approval.
-    Cancel,
-    /// Sign this PC out (and tell the server).
-    Disconnect,
-    /// Save a spend typed in the island.
-    Note(String),
-    /// Take back a spend just saved (its id).
-    Undo(String),
-    /// The Oyenza tab opened: today's money and the bills, now.
-    Refresh,
-    /// The Health tab opened: the steps from the phone, now (unless just asked for).
-    RefreshHealth,
-    /// Today's Try again: the day, now (unless just asked for).
-    RefreshDay,
-    /// A Pro add-on's page, or Add-ons, opened: whether the account has
-    /// Studio Pro, now (unless just asked).
-    CheckPro,
-}
-
 /// Requests for Notifications (`services::notifications`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotifyCmd {
@@ -81,50 +43,6 @@ pub enum NotifyCmd {
     Check,
     /// Open Windows' settings for which apps may read notifications.
     OpenWindowsSettings,
-}
-
-/// What the AI tab asks for. Hide and Show change `settings.usage`; the rest
-/// go to its worker (`services::usage`).
-#[derive(Clone, PartialEq)]
-pub enum UsageCmd {
-    /// Read every service now.
-    Refresh,
-    /// Keep a key typed for a service, sealed (DPAPI / the keychain), under
-    /// its secret name (`usage::KeyAsk::secret`).
-    SetKey { secret: &'static str, key: String },
-    /// Forget a typed key.
-    ClearKey(&'static str),
-    /// Connect inference.oyenza.com: ask for a code to show.
-    Connect,
-    /// Stop waiting for the code's approval.
-    CancelConnect,
-    /// Disconnect inference.oyenza.com (its key stops working there too).
-    Disconnect,
-    /// Start a service's own sign-in on this computer (Claude Code's
-    /// `claude auth login`, or the Claude app): `studio_usage::claude::sign_in`.
-    SignIn(ProviderId),
-    /// Take a service's card off the tab.
-    Hide(ProviderId),
-    /// Put it back, even when nothing of it is on this computer (a service
-    /// that takes a typed key).
-    Show(ProviderId),
-}
-
-/// Never shows a typed key (a command may end up in the log).
-impl std::fmt::Debug for UsageCmd {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UsageCmd::Refresh => f.write_str("Refresh"),
-            UsageCmd::SetKey { secret, .. } => write!(f, "SetKey({secret})"),
-            UsageCmd::ClearKey(secret) => write!(f, "ClearKey({secret})"),
-            UsageCmd::Connect => f.write_str("Connect"),
-            UsageCmd::CancelConnect => f.write_str("CancelConnect"),
-            UsageCmd::Disconnect => f.write_str("Disconnect"),
-            UsageCmd::SignIn(id) => write!(f, "SignIn({})", id.key()),
-            UsageCmd::Hide(id) => write!(f, "Hide({})", id.key()),
-            UsageCmd::Show(id) => write!(f, "Show({})", id.key()),
-        }
-    }
 }
 
 /// The IELTS page's buttons; `poni_core::ielts::Coach` decides what each
@@ -204,14 +122,6 @@ pub enum Command {
     Play(Sound),
     /// Open a URL in the default browser.
     OpenUrl(String),
-    /// Update to the version the update file offers: install it (Windows,
-    /// once its Setup is downloaded), or its release page or DMG.
-    Update,
-    /// Install it the next time the app starts (Windows).
-    InstallOnNextStart,
-    /// Settings' Check now: read the update file now, as the menu's Check
-    /// for updates… does (`AppState::update.said` takes the answer).
-    CheckForUpdates,
     /// Start/stop the 1 Hz system-stats sampler.
     WantStats(bool),
     /// Start with Windows on or off (the Settings page's switch).
@@ -226,33 +136,6 @@ pub enum Command {
     /// Show over games: ask Windows once for the right to read frames.
     AllowFps,
     Phone(PhoneCmd),
-    Pair(PairCmd),
-    Oyenza(OyenzaCmd),
-    Ielts(IeltsCmd),
-    Notes(NotesCmd),
-    /// Get one of Prayer times' online city files ("ed", "near/55_-5"; the
-    /// answer: `AppEvent::Cities`).
-    GetCities(String),
     /// Notifications.
     Notify(NotifyCmd),
-    Usage(UsageCmd),
-    /// The Downloads page (`pages::downloads`).
-    Download(DownloadCmd),
-}
-
-/// What the Downloads page asks for.
-#[derive(Clone, Debug, PartialEq)]
-pub enum DownloadCmd {
-    /// Download `url`'s video or sound.
-    Start { url: String, mode: poni_core::ytdlp::Mode },
-    /// Stop a download; one still waiting its turn leaves the list (Cancel).
-    Stop(u64),
-    /// Take a finished, failed or stopped job off the list.
-    Remove(u64),
-    ClearDone,
-    /// Open the finished file, or show it in its folder.
-    Open(u64),
-    Reveal(u64),
-    /// Put the clipboard's link in the page's link field.
-    PasteLink,
 }

@@ -1,6 +1,5 @@
 //! User settings, stored as JSON next to the data store.
 
-use crate::ielts::Spice;
 use crate::pomodoro::PomodoroConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -129,8 +128,9 @@ pub struct Settings {
     /// Add-ons switched on, by id (`poni_core::addons`). Ids this version
     /// doesn't know are kept, so a newer Poni's choices survive a save.
     pub addons: BTreeMap<String, bool>,
-    /// The Prayer times add-on's choices.
-    pub prayer: PrayerSettings,
+    /// Notifications' choices: which apps the island shows, and
+    /// whether who it's from and the message show at once.
+    pub notifications: crate::notifications::NotificationSettings,
     /// The Caffeine add-on's choices: bedtime, half-life, the limits, the reminder.
     pub caffeine: crate::caffeine::Prefs,
     /// Show over games: while a full-screen app is in front, the island
@@ -141,18 +141,8 @@ pub struct Settings {
     /// to the front, when the frame rate drops sharply, on Alt+Shift+F),
     /// then the island hides and Windows sends the game's frames straight to
     /// the screen. Off (the default), the readout stays while the game is in
-    /// front. Its own name: the corner test build wrote `game_readout`
-    /// ("peek" as its default) into the files of the people who tried it.
+    /// front.
     pub game_peek: bool,
-    /// The AI tab's choices (its readers are the `studio-usage` crate).
-    pub usage: UsageSettings,
-    /// The Record page's choices (Oyenza Studio Recorder).
-    pub record: RecordSettings,
-    /// Notifications' choices: which apps the island shows, and
-    /// whether who it's from and the message show at once.
-    pub notifications: crate::notifications::NotificationSettings,
-    /// How Oyen talks on the IELTS page (Sopan, Gaul or Ngegas, the default).
-    pub ielts_spice: Spice,
 }
 
 /// What the AI tab shows and whether it gives heads-up notices.
@@ -200,74 +190,6 @@ impl RecordSettings {
     }
 }
 
-/// What plays when a prayer's time comes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PrayerSound {
-    /// The adzan recording (Subuh plays the tone: the recording isn't Subuh's adzan).
-    Adzan,
-    /// A short system tone.
-    #[default]
-    Tone,
-    Silent,
-}
-
-/// Whose prayer times and Hijri dates the add-on follows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PrayerFollow {
-    /// Kemenag RI: its times, and the government's Hijri calendar (MABIMS, isbat).
-    #[default]
-    Kemenag,
-    /// Muhammadiyah: Majelis Tarjih's times (Subuh at 18°) for Indonesian
-    /// places, and the Kalender Hijriah Global Tunggal (KHGT) everywhere.
-    Muhammadiyah,
-}
-
-impl PrayerFollow {
-    pub fn calendar(self) -> crate::hijri::Calendar {
-        match self {
-            PrayerFollow::Kemenag => crate::hijri::Calendar::Kemenag,
-            PrayerFollow::Muhammadiyah => crate::hijri::Calendar::Khgt,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PrayerSettings {
-    /// The place the times are for: its id in the add-on's place list, or
-    /// "w:lat,lng" for a city abroad. None until one is found or picked.
-    pub place: Option<String>,
-    /// That city abroad as its own few lines (`prayer::World::excerpt`): its
-    /// name, country, point and clock, so its times need nothing online.
-    pub world_place: Option<String>,
-    /// Let Windows' location pick the nearest place, and pick again when the
-    /// PC moves. Picking a place by hand turns this off.
-    pub follow_location: bool,
-    pub sound: PrayerSound,
-    /// Minutes before each prayer the island counts down (0 = no countdown).
-    pub remind_before_min: u32,
-    /// Pause music that is playing when the adzan starts (it stays paused).
-    pub pause_music: bool,
-    /// Kemenag's times and calendar, or Muhammadiyah's.
-    pub follow: PrayerFollow,
-}
-
-impl Default for PrayerSettings {
-    fn default() -> Self {
-        Self {
-            place: None,
-            world_place: None,
-            follow_location: true,
-            sound: PrayerSound::Tone,
-            remind_before_min: 10,
-            pause_music: true,
-            follow: PrayerFollow::Kemenag,
-        }
-    }
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -298,14 +220,10 @@ impl Default for Settings {
             oyenza_show_amounts: false,
             system_history: true,
             addons: BTreeMap::new(),
-            prayer: PrayerSettings::default(),
             caffeine: crate::caffeine::Prefs::default(),
             game_stats: false,
             game_peek: false,
-            usage: UsageSettings::default(),
-            record: RecordSettings::default(),
             notifications: crate::notifications::NotificationSettings::default(),
-            ielts_spice: Spice::default(),
         }
     }
 }
@@ -412,7 +330,6 @@ impl Settings {
         p.short_break_min = p.short_break_min.clamp(1, 60);
         p.long_break_min = p.long_break_min.clamp(1, 120);
         p.long_every = p.long_every.min(12);
-        self.prayer.remind_before_min = self.prayer.remind_before_min.min(60);
         self
     }
 }
@@ -457,20 +374,6 @@ mod tests {
         // It survives a save and a load.
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert!(!back.addon_unset("ja"));
-    }
-
-    #[test]
-    fn prayer_defaults_follow_location_with_a_tone_ten_minutes_before() {
-        let p = Settings::default().prayer;
-        assert_eq!((p.place, p.follow_location, p.sound, p.remind_before_min, p.pause_music), (None, true, PrayerSound::Tone, 10, true));
-        let s: Settings = serde_json::from_str(r#"{"prayer":{"place":"jakarta","sound":"adzan","remind_before_min":600}}"#).unwrap();
-        let s = s.sanitized();
-        assert_eq!((s.prayer.place.as_deref(), s.prayer.sound, s.prayer.remind_before_min), (Some("jakarta"), PrayerSound::Adzan, 60));
-        assert!(s.prayer.follow_location);
-        assert_eq!(s.prayer.follow, PrayerFollow::Kemenag, "settings from before the choice follow Kemenag");
-        let m: Settings = serde_json::from_str(r#"{"prayer":{"follow":"muhammadiyah"}}"#).unwrap();
-        assert_eq!(m.prayer.follow, PrayerFollow::Muhammadiyah);
-        assert!(serde_json::to_string(&m).unwrap().contains(r#""follow":"muhammadiyah""#));
     }
 
     #[test]
@@ -680,17 +583,6 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"hidden_tabs":["today","future"]}"#).unwrap();
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.hidden_tabs, ["today", "future"]);
-    }
-
-    #[test]
-    fn ielts_talks_ngegas_until_told_otherwise() {
-        assert_eq!(Settings::default().ielts_spice, Spice::Ngegas);
-        let s: Settings = serde_json::from_str(r#"{"ielts_spice":"gaul"}"#).unwrap();
-        assert_eq!(s.ielts_spice, Spice::Gaul);
-        // A spice from a newer version is the default.
-        let s: Settings = serde_json::from_str(r#"{"ielts_spice":"pedas"}"#).unwrap();
-        assert_eq!(s.ielts_spice, Spice::Ngegas);
-        assert!(serde_json::to_string(&Settings::default()).unwrap().contains(r#""ielts_spice":"ngegas""#));
     }
 
     #[test]

@@ -44,11 +44,6 @@ pub struct Store {
     /// Oyenza bill reminders already shown (`oyenza::notice_key`), so a bill
     /// is reminded of once even across restarts.
     pub oyenza_noticed: Vec<String>,
-    /// The Script page's script and its pace.
-    pub script: crate::script::Script,
-    /// The Stocks add-on's list: the stocks after the IHSG, the one shown,
-    /// the change pills' choice and the chart's range.
-    pub stocks: crate::stocks::Watchlist,
     /// The Caffeine add-on's drinks, the last 14 days.
     pub caffeine: crate::caffeine::Log,
     /// Oyenza Studio Recorder has written to the island (`recorder::Message`)
@@ -67,8 +62,6 @@ impl Default for Store {
             focus_sessions: BTreeMap::new(),
             last_page: String::new(),
             oyenza_noticed: Vec::new(),
-            script: crate::script::Script::default(),
-            stocks: crate::stocks::Watchlist::default(),
             caffeine: crate::caffeine::Log::default(),
             recorder_island: false,
         }

@@ -151,9 +151,6 @@ thread_local! {
     static HELD: Cell<Option<Held>> = const { Cell::new(None) };
     /// Where it was left by hand, against the sun.
     static LEFT: Cell<Option<Left>> = const { Cell::new(None) };
-    /// The Prayer times place's sunrise and sunset, worked out once a
-    /// quarter of an hour: the whole theme's look asks for them every frame.
-    static SUN: Cell<Option<(SunKey, (f32, f32))>> = const { Cell::new(None) };
     /// Another theme has drawn since the picture last showed: when it shows
     /// again, the theme was just picked, and the ball rolls into place.
     static PICKED: Cell<bool> = const { Cell::new(false) };
@@ -237,42 +234,8 @@ fn badge(st: &AppState) -> Option<Badge> {
 
 /// What the Prayer place's sun times were worked out for: the place, whose
 /// schedule it follows, the quarter of an hour and this computer's clock
-/// against UTC.
-#[derive(Clone, Copy, PartialEq)]
-struct SunKey {
-    lat: u64,
-    lng: u64,
-    follow: poni_core::settings::PrayerFollow,
-    quarter: i64,
-    ahead: i64,
-}
-
-/// When the sun rises and sets, in minutes of this computer's day: at the
-/// Prayer times add-on's place when it has one, else six to six.
-fn sun(st: &AppState) -> (f32, f32) {
-    let Some(place) = st.prayer.place.as_ref().filter(|_| st.prayer_on()) else { return HOUSE_DAY };
-    // This computer's clock against UTC, to the minute.
-    let local = st.local.hour as i64 * 3600 + st.local.minute as i64 * 60 + st.local.second as i64;
-    let ahead = (((local - st.unix.rem_euclid(86_400)) as f64 / 60.0).round() as i64 * 60 + 43_200).rem_euclid(86_400) - 43_200;
-    let key = SunKey { lat: place.lat.to_bits(), lng: place.lng.to_bits(), follow: st.settings.prayer.follow, quarter: st.prayer_now().div_euclid(900), ahead };
-    if let Some((_, times)) = SUN.with(|s| s.get()).filter(|(k, _)| *k == key) {
-        return times;
-    }
-    let times = st.prayer_site().and_then(|site| sun_at(&site, st.prayer_now(), ahead)).unwrap_or(HOUSE_DAY);
-    SUN.with(|s| s.set(Some((key, times))));
-    times
-}
-
-/// Sunrise and sunset (the schedule's terbit and maghrib) at `site` on its
-/// own date at `now` (UTC seconds), as minutes of the day on a clock
-/// `ahead` seconds east of UTC: the place's sun on the clock the picture's
-/// time comes from. `None` where the day has no sunrise or sunset, or one
-/// the picture can't show (the sun up or down for less than two hours).
-fn sun_at(site: &poni_core::prayer::Site, now: i64, ahead: i64) -> Option<(f32, f32)> {
-    let t = poni_core::prayer::day_times(site, site.local_day(now))?;
-    let minute = |utc: i64| ((utc + ahead).div_euclid(60).rem_euclid(1440)) as f32;
-    let (rise, set) = (minute(t.terbit), minute(t.maghrib));
-    (set - rise >= 120.0 && set - rise <= 1320.0).then_some((rise, set))
+fn sun(_st: &AppState) -> (f32, f32) {
+    HOUSE_DAY
 }
 
 /// The moment the pill shows, the ball where the time has it.

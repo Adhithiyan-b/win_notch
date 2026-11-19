@@ -37,7 +37,6 @@ use crate::ui::Ui;
 use poni_core::geom::{palette, Point, Rect};
 use poni_core::lrc::{LyricLine, Lyrics};
 use poni_core::nowplaying::lyrics_lead_s;
-use poni_core::romanize;
 use poni_core::timeline::LyricClock;
 use std::cell::RefCell;
 
@@ -132,8 +131,8 @@ pub fn sings(st: &AppState) -> bool {
 /// Whether the pill sings this song with readings under its lines (two
 /// rows): it sings, readings are on, and some line has one. For the whole
 /// song, as [`sings`] is.
-pub fn reads(st: &AppState) -> bool {
-    sings(st) && st.settings.lyrics_pronunciation && st.lyrics.ruby.iter().any(|p| p.iter().any(|r| !r.roman.is_empty()))
+pub fn reads(_st: &AppState) -> bool {
+    false
 }
 
 /// The lyrics the pill follows for the song playing now (see [`sings`]).
@@ -318,20 +317,12 @@ fn line_text(st: &AppState, i: usize) -> Option<&str> {
     st.lyrics.lyrics.as_ref()?.lines.get(i).map(|l| l.text.trim())
 }
 
-/// Line `i`'s reading in Latin letters, when readings are on and it has one.
-fn reading_at(st: &AppState, i: usize) -> Option<String> {
-    let pieces = st.lyrics.ruby.get(i).filter(|_| st.settings.lyrics_pronunciation)?;
-    romanize::reading(pieces)
+fn reading_at(_st: &AppState, _i: usize) -> Option<String> {
+    None
 }
 
-/// Tells line `i`'s readings apart without building them: they change when
-/// readings are switched on or off, or when the Japanese readings add-on
-/// comes in and the song is read again.
-fn reading_sig(st: &AppState, i: usize) -> usize {
-    match st.lyrics.ruby.get(i) {
-        Some(pieces) if st.settings.lyrics_pronunciation => pieces.iter().map(|p| p.roman.len() + 1).sum(),
-        _ => 0,
-    }
+fn reading_sig(_st: &AppState, _i: usize) -> usize {
+    0
 }
 
 // ---------------------------------------------------------------- drawing
@@ -526,7 +517,7 @@ mod tests {
             can_seek: true,
             track_key: key.clone(),
         });
-        st.lyrics = LyricsState { track_key: key, status: LyricsStatus::Found, lyrics: Some(parse_lrc(lrc)), source: "Sample".into(), ruby: Vec::new(), wants_ja_readings: false };
+        st.lyrics = LyricsState { track_key: key, status: LyricsStatus::Found, lyrics: Some(parse_lrc(lrc)), source: "Sample".into() };
         st
     }
 
@@ -781,89 +772,6 @@ mod tests {
     /// The pieces of a line of [`SONG_JA`], as a reader gives them.
     fn pieces(parts: &[(&str, &str)]) -> Vec<Ruby> {
         parts.iter().map(|(text, roman)| Ruby { text: (*text).into(), roman: (*roman).into() }).collect()
-    }
-
-    // Original placeholder text, not real song lyrics: two Japanese lines
-    // around one in English, which needs no reading.
-    const SONG_JA: &str = "\
-[00:10.00]紙の舟よ
-[00:14.00]Paper boats
-[00:18.00]光を見つける
-";
-
-    fn song_ja() -> AppState {
-        let mut st = song(SONG_JA);
-        st.settings.lyrics_pronunciation = true;
-        st.lyrics.ruby = vec![
-            pieces(&[("紙の", "kami no"), ("舟よ", "fune yo")]),
-            Vec::new(),
-            pieces(&[("光を", "hikari wo"), ("見つける", "mitsukeru")]),
-        ];
-        st
-    }
-
-    #[test]
-    fn a_song_with_readings_sings_them_under_its_lines() {
-        let mut st = song_ja();
-        assert!(reads(&st));
-        assert_eq!(reading_at(&st, 0).as_deref(), Some("kami no fune yo"));
-        // The English line needs none: it sits in the middle on its own.
-        assert_eq!(reading_at(&st, 1), None);
-        assert_eq!(reading_at(&st, 2).as_deref(), Some("hikari wo mitsukeru"));
-        // Readings switched off: one row, the lines as they are written.
-        st.settings.lyrics_pronunciation = false;
-        assert!(!reads(&st));
-        assert_eq!(reading_at(&st, 0), None);
-        assert_ne!(reading_sig(&st, 0), reading_sig(&song_ja(), 0));
-        // A song with nothing to read, or one the pill doesn't sing.
-        assert!(!reads(&song(SONG)));
-        let mut st = song_ja();
-        st.settings.lyrics = false;
-        assert!(!reads(&st));
-    }
-
-    #[test]
-    fn a_line_brings_its_reading_and_takes_it_along_when_it_leaves() {
-        let st = song_ja();
-        let mut s = State::default();
-        assert!(!s.seen(100.0, Some(103.0)));
-        let first = s.show(100.0, false, 0, "紙の舟よ", reading_sig(&st, 0), || reading_at(&st, 0));
-        assert_eq!(first.reading.as_deref(), Some("kami no fune yo"));
-        first.slot_w = 180.0;
-        // The next line rises in while this one rises away, its reading with it.
-        assert!(s.seen(103.0, Some(106.0)));
-        let next = s.show(103.0, true, 2, "光を見つける", reading_sig(&st, 2), || reading_at(&st, 2));
-        assert_eq!(next.reading.as_deref(), Some("hikari wo mitsukeru"));
-        assert_eq!(next.leaving, Some(("紙の舟よ".to_string(), Some("kami no fune yo".to_string()), 180.0)));
-    }
-
-    #[test]
-    fn readings_that_come_in_under_a_line_show_without_a_fade() {
-        // Before the Japanese readings add-on: only the kana read.
-        let mut st = song_ja();
-        st.lyrics.ruby[2] = pieces(&[("光を", "wo"), ("見つける", "")]);
-        let mut s = State::default();
-        let mut built = 0;
-        assert!(!s.seen(100.0, Some(103.0)));
-        s.show(100.0, false, 2, "光を見つける", reading_sig(&st, 2), || {
-            built += 1;
-            reading_at(&st, 2)
-        });
-        assert_eq!(s.shown.as_ref().unwrap().reading.as_deref(), Some("wo 見つける"));
-        // Frame after frame, the same readings: built once.
-        for i in 1..5 {
-            assert!(s.seen(100.0 + f64::from(i) * 0.016, Some(103.0)));
-            s.show(100.0 + f64::from(i) * 0.016, true, 2, "光を見つける", reading_sig(&st, 2), || {
-                built += 1;
-                reading_at(&st, 2)
-            });
-        }
-        assert_eq!(built, 1);
-        // The add-on comes in and the song is read again: the same line, its new reading at once.
-        let read = song_ja();
-        assert!(s.seen(100.1, Some(103.0)));
-        let now = s.show(100.1, true, 2, "光を見つける", reading_sig(&read, 2), || reading_at(&read, 2));
-        assert_eq!((now.reading.as_deref(), now.leaving.clone(), now.since), (Some("hikari wo mitsukeru"), None, f64::NEG_INFINITY));
     }
 
     #[test]

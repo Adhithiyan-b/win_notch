@@ -2,11 +2,11 @@
 
 ## HANDOFF
 - Current Item: Step A (Remove upstream dependencies)
-- Last Completed Step: Background poni-core test terminated; files deleted from git
-- WIP Files: crates/poni (app.rs, services, pages, tray, state), Cargo.toml, Cargo.lock
-- Compile State: HEAD may not compile: run cargo check first
-- Exact Next Step: Run `cargo check --bin dynamic-notch` and resolve remaining references in poni
-- Tried / Do NOT Repeat: Do NOT run full poni-core test suite during step A; do NOT wait >5 min on tasks
+- Last Completed Step: previous session deleted pages/addons.rs, pages/caffeine.rs, services/mic.rs, last_call.rs, selftest.rs and edited app.rs, state.rs, activities.rs, commands.rs, events.rs, pages/mod.rs, services/mod.rs, lyrics.rs, pill/live.rs, notice.rs, diorama.rs; HANDOFF was stale; compile state unknown
+- WIP Files: crates/poni (main.rs, app.rs, selftest.rs, settings_window.rs, etc.)
+- Compile State: BROKEN (compilation errors in poni on deleted references)
+- Exact Next Step: Fix compile errors via scripts\chk.ps1 by deleting references to removed modules
+- Tried / Do NOT Repeat: Do NOT recreate deleted off-list modules; do NOT run full poni-core test suite; do NOT touch research or target
 - Waiting On: Nothing
 
 ## Current Status

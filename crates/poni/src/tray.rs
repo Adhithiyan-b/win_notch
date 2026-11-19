@@ -1,8 +1,6 @@
 //! Notification-area icon and its menu (also shown on right-click of the island).
 
 use crate::events::WM_APP_TRAY;
-use crate::state::OyenzaLink;
-use crate::updates::UpdateLine;
 use poni_core::settings::{IdleStyle, MotionMode, Settings, Theme};
 use windows::core::{Result, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
@@ -82,19 +80,7 @@ pub enum MenuCmd {
     About,
     /// "Lyrics by LRCLIB": opens lrclib.net.
     LyricsCredit,
-    AppleMusicToken,
-    AppleMusicHelp,
-    AppleMusicForget,
-    OyenzaSignIn,
-    OyenzaCancel,
-    OyenzaDisconnect,
-    OyenzaOpen,
-    ToggleOyenzaAmounts,
     RecordScreen,
-    /// "Update to Oyenza Studio 0.2.5…" (`crate::updates`).
-    Update,
-    /// "Check for updates…": read the update file now (`crate::updates`).
-    CheckForUpdates,
     Quit,
 }
 
@@ -124,7 +110,7 @@ fn idle_label(s: IdleStyle, theme: Theme) -> &'static str {
 
 /// `update`: a later version the update file offers, or Check for updates…
 /// (`crate::updates::menu_line`).
-pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: bool, update: UpdateLine) -> Vec<MenuItem> {
+pub fn menu_items(s: &Settings, pinned: bool, recorder: bool) -> Vec<MenuItem> {
     // The look the theme draws is the one checked: outside Pill, Status shows the clock.
     let shown = crate::pill::status::shown(s.theme, s.idle_style);
     let style = |st: IdleStyle| item(idle_label(st, s.theme), MenuCmd::ToggleIdleStyle(st), shown == st);
@@ -213,50 +199,7 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
     if recorder {
         items.splice(0..0, [item("Record this screen", MenuCmd::RecordScreen, false), MenuItem::Separator]);
     }
-    match update {
-        // A new version first, until it is installed.
-        UpdateLine::Offer(v) => {
-            items.splice(0..0, [item(&format!("Update to Oyenza Studio {v}…"), MenuCmd::Update, false), MenuItem::Separator]);
-        }
-        // Otherwise a look on request, under the version line.
-        UpdateLine::Check => {
-            let at = items.iter().position(|i| matches!(i, MenuItem::Item { cmd: MenuCmd::About, .. })).map_or(items.len(), |i| i + 1);
-            items.insert(at, item("Check for updates…", MenuCmd::CheckForUpdates, false));
-        }
-        UpdateLine::None => {}
-    }
     items
-}
-
-/// Opt-in lyrics from Apple Music with the user's own token.
-fn apple_music_menu() -> MenuItem {
-    let on = crate::paths::apple_music_token_path().exists();
-    let mut items = vec![
-        item("Use token from clipboard", MenuCmd::AppleMusicToken, false),
-        item("How to get the token", MenuCmd::AppleMusicHelp, false),
-    ];
-    if on {
-        items.push(MenuItem::Separator);
-        items.push(item("Remove token", MenuCmd::AppleMusicForget, false));
-    }
-    MenuItem::Sub { label: if on { "Apple Music lyrics: on".into() } else { "Apple Music lyrics".into() }, items }
-}
-
-/// Oyenza, optional: sign in with a code from oyenza.app, then what the
-/// island may show, and signing out.
-fn oyenza_menu(s: &Settings, link: &OyenzaLink) -> MenuItem {
-    let items = match link {
-        OyenzaLink::Off => vec![item("Sign in to Oyenza…", MenuCmd::OyenzaSignIn, false)],
-        OyenzaLink::Connecting { .. } => vec![item("Cancel sign-in", MenuCmd::OyenzaCancel, false)],
-        OyenzaLink::Connected { account } => vec![
-            MenuItem::Info { label: format!("Connected as {account}") },
-            item("Show amounts on the island", MenuCmd::ToggleOyenzaAmounts, s.oyenza_show_amounts),
-            item("Open oyenza.app", MenuCmd::OyenzaOpen, false),
-            MenuItem::Separator,
-            item("Disconnect", MenuCmd::OyenzaDisconnect, false),
-        ],
-    };
-    MenuItem::Sub { label: "Oyenza".into(), items }
 }
 
 fn build(menu: HMENU, items: &[MenuItem], cmds: &mut Vec<MenuCmd>) {
@@ -306,7 +249,7 @@ pub fn show_menu(owner: HWND, pt: POINT, items: &[MenuItem]) -> Option<MenuCmd> 
         let cmd = if idx == 0 { None } else { cmds.get(idx - 1).cloned() };
         let launches = matches!(
             cmd.as_ref(),
-            Some(MenuCmd::ShowSettings | MenuCmd::OpenSettings | MenuCmd::OpenDataFolder | MenuCmd::About | MenuCmd::LyricsCredit | MenuCmd::AppleMusicHelp | MenuCmd::OyenzaOpen)
+            Some(MenuCmd::ShowSettings | MenuCmd::OpenSettings | MenuCmd::OpenDataFolder | MenuCmd::About | MenuCmd::LyricsCredit)
         );
         if !launches && !prev.is_invalid() && prev != owner && IsWindow(prev).as_bool() && GetForegroundWindow() == owner {
             let _ = SetForegroundWindow(prev);
@@ -320,7 +263,7 @@ mod tests {
     use super::*;
 
     fn fullscreen_choices(s: &Settings) -> Vec<(String, MenuCmd, bool)> {
-        let items = menu_items(s, false, &OyenzaLink::Off, false, UpdateLine::None);
+        let items = menu_items(s, false, false);
         let Some(MenuItem::Sub { items, .. }) = items.into_iter().find(|i| matches!(i, MenuItem::Sub { label, .. } if label == "In full-screen apps")) else {
             panic!("no full-screen submenu");
         };
@@ -335,7 +278,7 @@ mod tests {
 
     #[test]
     fn the_menu_says_which_version_this_is() {
-        let items = menu_items(&Settings::default(), false, &OyenzaLink::Off, false, UpdateLine::None);
+        let items = menu_items(&Settings::default(), false, false);
         let labels: Vec<(String, MenuCmd)> = items
             .into_iter()
             .filter_map(|i| match i {
@@ -352,40 +295,9 @@ mod tests {
     }
 
     #[test]
-    fn a_new_version_comes_first_until_it_is_installed() {
-        let s = Settings::default();
-        let first = |update: UpdateLine| match menu_items(&s, false, &OyenzaLink::Off, true, update).into_iter().next() {
-            Some(MenuItem::Item { label, cmd, .. }) => Some((label, cmd)),
-            _ => None,
-        };
-        assert_eq!(first(UpdateLine::Offer("0.2.5".into())), Some(("Update to Oyenza Studio 0.2.5…".to_string(), MenuCmd::Update)));
-        assert_eq!(first(UpdateLine::None).map(|(_, cmd)| cmd), Some(MenuCmd::RecordScreen));
-        assert_eq!(first(UpdateLine::Check).map(|(_, cmd)| cmd), Some(MenuCmd::RecordScreen));
-    }
-
-    #[test]
-    fn check_for_updates_sits_under_the_version_line() {
-        let cmds = |update: UpdateLine| -> Vec<MenuCmd> {
-            menu_items(&Settings::default(), false, &OyenzaLink::Off, false, update)
-                .into_iter()
-                .filter_map(|i| match i {
-                    MenuItem::Item { cmd, .. } => Some(cmd),
-                    _ => None,
-                })
-                .collect()
-        };
-        let items = cmds(UpdateLine::Check);
-        let about = items.iter().position(|c| *c == MenuCmd::About).expect("no About line");
-        assert_eq!(&items[about..], &[MenuCmd::About, MenuCmd::CheckForUpdates, MenuCmd::Quit]);
-        // Not while a version is on offer (its line comes first), nor with the checks off.
-        assert!(!cmds(UpdateLine::Offer("0.2.5".into())).contains(&MenuCmd::CheckForUpdates));
-        assert!(!cmds(UpdateLine::None).contains(&MenuCmd::CheckForUpdates));
-    }
-
-    #[test]
     fn the_way_back_to_the_centre_shows_once_the_island_moved() {
         let cmds = |s: &Settings| -> Vec<MenuCmd> {
-            menu_items(s, false, &OyenzaLink::Off, false, UpdateLine::None)
+            menu_items(s, false, false)
                 .into_iter()
                 .filter_map(|i| match i {
                     MenuItem::Item { cmd, .. } => Some(cmd),
@@ -401,20 +313,20 @@ mod tests {
 
     #[test]
     fn system_history_is_in_the_menu_only_while_system_is_on() {
-        let has = |s: &Settings| menu_items(s, false, &OyenzaLink::Off, false, UpdateLine::None).iter().position(|i| matches!(i, MenuItem::Item { cmd: MenuCmd::ToggleSystemHistory, .. }));
+        let has = |s: &Settings| menu_items(s, false, false).iter().position(|i| matches!(i, MenuItem::Item { cmd: MenuCmd::ToggleSystemHistory, .. }));
         let mut s = Settings::default();
         assert_eq!(has(&s), None, "System is off by default");
         s.set_addon(poni_core::addons::SYSTEM.id, true);
         let at = has(&s).expect("no System history item");
         // Right above Sounds, where it always was.
-        let items = menu_items(&s, false, &OyenzaLink::Off, false, UpdateLine::None);
+        let items = menu_items(&s, false, false);
         assert!(matches!(&items[at + 1], MenuItem::Item { cmd: MenuCmd::ToggleSounds, .. }));
     }
 
     #[test]
     fn record_this_screen_shows_only_with_the_recorder() {
         let s = Settings::default();
-        let first = |recorder: bool| match menu_items(&s, false, &OyenzaLink::Off, recorder, UpdateLine::None).into_iter().next() {
+        let first = |recorder: bool| match menu_items(&s, false, recorder).into_iter().next() {
             Some(MenuItem::Item { label, cmd, .. }) => Some((label, cmd)),
             _ => None,
         };
@@ -423,7 +335,7 @@ mod tests {
     }
 
     fn idle_choices(s: &Settings) -> Vec<(String, bool)> {
-        let items = menu_items(s, false, &OyenzaLink::Off, false, UpdateLine::None);
+        let items = menu_items(s, false, false);
         let Some(MenuItem::Sub { items, .. }) = items.into_iter().find(|i| matches!(i, MenuItem::Sub { label, .. } if label == "Idle look")) else {
             panic!("no idle look submenu");
         };
@@ -475,7 +387,7 @@ mod tests {
     }
 
     fn theme_choices(s: &Settings) -> Vec<(String, MenuCmd, bool)> {
-        let items = menu_items(s, false, &OyenzaLink::Off, false, UpdateLine::None);
+        let items = menu_items(s, false, false);
         let Some(MenuItem::Sub { items, .. }) = items.into_iter().find(|i| matches!(i, MenuItem::Sub { label, .. } if label == "Theme")) else {
             panic!("no theme submenu");
         };
@@ -505,7 +417,7 @@ mod tests {
     #[test]
     fn start_with_windows_follows_the_full_screen_submenu() {
         // Over maximized windows (Step aside) is gone: nothing sits between them.
-        let items = menu_items(&Settings::default(), false, &OyenzaLink::Off, false, UpdateLine::None);
+        let items = menu_items(&Settings::default(), false, false);
         let fs = items.iter().position(|i| matches!(i, MenuItem::Sub { label, .. } if label == "In full-screen apps")).expect("full-screen submenu");
         assert!(matches!(items.get(fs + 1), Some(MenuItem::Item { cmd: MenuCmd::ToggleAutostart, .. })));
     }

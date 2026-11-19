@@ -9,28 +9,15 @@
 //! [`crate::commands::Command`]s for side effects (media control, opening
 //! files, saving, …).
 
-pub mod addons;
-pub mod caffeine;
 pub mod card;
-pub mod downloads;
-pub mod downloads_offer;
 pub mod focus;
-pub mod health;
-pub mod ielts;
 pub mod media;
-pub mod notes;
 pub mod notifications;
-pub mod oyenza;
-pub mod prayer;
 pub mod record;
-pub mod script;
 pub mod settings;
 pub mod shelf;
-pub mod stocks;
 pub mod system;
 pub mod tasks;
-pub mod today;
-pub mod usage;
 
 use crate::commands::Command;
 use crate::gfx::{TextStyle, Weight};
@@ -58,70 +45,24 @@ pub fn header_rect(body: Rect) -> Rect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PageKind {
     Media,
-    Today,
     Shelf,
     Tasks,
     Focus,
-    /// AI usage: how much of each AI coding plan is left (`pages::usage`).
-    /// Part of Studio Pro: in the row with it, until switched off.
-    Ai,
-    /// Oyenza, with Oyen himself as its tab (`oyen::tab`): signed out, the
-    /// way to sign in; signed in, the money by day.
-    Oyenza,
-    /// The Health add-on's page, while it is on ([`tabs`]): the steps
-    /// Oyenza sends, so its tab sits beside Oyenza's.
-    Health,
-    /// The IELTS add-on's page, while it is on ([`tabs`]): Oyen as an IELTS
-    /// Speaking examiner, through the Oyenza account, so its tab follows
-    /// Oyenza's and Health's.
-    Ielts,
-    /// The Meeting notes add-on's page, while it is on ([`tabs`]; Windows):
-    /// Oyen listens to a meeting and the Oyenza account writes its notes, so
-    /// its tab follows IELTS'.
-    Notes,
-    /// The System add-on's page, while it is on ([`tabs`]).
     System,
-    /// The teleprompter: a script read under the webcam.
-    Script,
-    /// Screen recording with Oyenza Studio Recorder, while its add-on is on
-    /// ([`tabs`]): what to record, then the recording under way.
     Record,
-    /// Prayer times, while that add-on is on ([`tabs`]).
-    Prayer,
-    /// The IHSG and the person's stocks, while the Stocks add-on is on ([`tabs`]).
-    Stocks,
-    /// The day's caffeine, while the Caffeine add-on is on ([`tabs`]).
-    Caffeine,
-    /// Links to save as video or sound, while the Downloader add-on is on ([`tabs`]).
-    Downloads,
-    /// Which apps' notifications show on the island, while Notifications is
-    /// on ([`tabs`]; Windows' Store copy only).
     Notifications,
-    /// The "+" at the end of the tab row: features to switch on, each of
-    /// which downloads only then (`poni_core::addons`).
-    Addons,
-    /// Behind the gear on the right of the header, never in the tab row.
     Settings,
 }
 
 impl PageKind {
-    /// The tab row's order: the island's own pages, Oyenza, then the
-    /// add-ons' pages and the "+".
-    pub const ALL: [PageKind; 15] = [
+    pub const ALL: [PageKind; 8] = [
         PageKind::Media,
-        PageKind::Today,
         PageKind::Shelf,
         PageKind::Tasks,
         PageKind::Focus,
         PageKind::System,
-        PageKind::Script,
         PageKind::Record,
-        PageKind::Prayer,
-        PageKind::Stocks,
-        PageKind::Caffeine,
-        PageKind::Downloads,
         PageKind::Notifications,
-        PageKind::Addons,
         PageKind::Settings,
     ];
 
@@ -129,54 +70,28 @@ impl PageKind {
         match self {
             PageKind::Media => "media",
             PageKind::Focus => "focus",
-            PageKind::Ai => "ai",
-            PageKind::Health => "health",
-            PageKind::Ielts => "ielts",
-            PageKind::Notes => "notes",
             PageKind::Shelf => "shelf",
             PageKind::Tasks => "tasks",
-            PageKind::Today => "today",
             PageKind::System => "system",
-            PageKind::Script => "script",
             PageKind::Record => "record",
-            PageKind::Oyenza => "oyenza",
-            PageKind::Prayer => "prayer",
-            PageKind::Stocks => "stocks",
-            PageKind::Caffeine => "caffeine",
-            PageKind::Downloads => "downloads",
             PageKind::Notifications => "notifications",
-            PageKind::Addons => "addons",
             PageKind::Settings => "settings",
         }
     }
 
     pub fn from_key(s: &str) -> PageKind {
-        // Health took the Water page's place in the tab row.
-        let s = if s.trim().eq_ignore_ascii_case("water") { "health" } else { s.trim() };
-        Self::ALL.into_iter().find(|p| p.key().eq_ignore_ascii_case(s)).unwrap_or(PageKind::Media)
+        Self::ALL.into_iter().find(|p| p.key().eq_ignore_ascii_case(s.trim())).unwrap_or(PageKind::Media)
     }
 
     pub fn title(self) -> &'static str {
         match self {
             PageKind::Media => "Music",
             PageKind::Focus => "Focus",
-            PageKind::Ai => "AI",
-            PageKind::Health => "Health",
-            PageKind::Ielts => "IELTS",
-            PageKind::Notes => "Notes",
             PageKind::Shelf => "Shelf",
             PageKind::Tasks => "Tasks",
-            PageKind::Today => "Today",
             PageKind::System => "System",
-            PageKind::Script => "Script",
             PageKind::Record => "Record",
-            PageKind::Oyenza => "Oyenza",
-            PageKind::Prayer => "Prayer",
-            PageKind::Stocks => "Stocks",
-            PageKind::Caffeine => "Caffeine",
-            PageKind::Downloads => "Downloads",
             PageKind::Notifications => "Notifications",
-            PageKind::Addons => "Add-ons",
             PageKind::Settings => "Settings",
         }
     }
@@ -185,23 +100,11 @@ impl PageKind {
         match self {
             PageKind::Media => Icon::Music,
             PageKind::Focus => Icon::Timer,
-            PageKind::Ai => Icon::Ai,
-            PageKind::Health => Icon::Steps,
-            PageKind::Ielts => Icon::Mic,
-            PageKind::Notes => Icon::Notes,
             PageKind::Shelf => Icon::Tray,
             PageKind::Tasks => Icon::ListChecks,
-            PageKind::Today => Icon::Calendar,
             PageKind::System => Icon::Gauge,
-            PageKind::Script => Icon::Script,
             PageKind::Record => Icon::Recorder,
-            PageKind::Oyenza => Icon::Wallet,
-            PageKind::Prayer => Icon::Moon,
-            PageKind::Stocks => Icon::Stocks,
-            PageKind::Caffeine => Icon::Coffee,
-            PageKind::Downloads => Icon::Download,
             PageKind::Notifications => Icon::Bell,
-            PageKind::Addons => Icon::Addons,
             PageKind::Settings => Icon::Gear,
         }
     }
@@ -225,7 +128,7 @@ impl PageKind {
     /// Notifications, which goes off with its tab (it's offered only where
     /// the copy can read notifications). Oyenza stays; the add-ons' pages come
     /// and go with their switches, AI's with Studio Pro.
-    pub const HIDEABLE: [PageKind; 6] = [PageKind::Media, PageKind::Today, PageKind::Shelf, PageKind::Tasks, PageKind::Focus, PageKind::Notifications];
+    pub const HIDEABLE: [PageKind; 5] = [PageKind::Media, PageKind::Shelf, PageKind::Tasks, PageKind::Focus, PageKind::Notifications];
 
     pub fn hideable(self) -> bool {
         Self::HIDEABLE.contains(&self)
@@ -268,16 +171,7 @@ fn row(st: &AppState, open: Option<PageKind>) -> Vec<PageKind> {
     PageKind::ALL
         .into_iter()
         .filter(|&p| match p {
-            PageKind::Health => st.health_on(),
-            PageKind::Ielts => st.ielts_on(),
-            PageKind::Notes => st.notes_on(),
-            PageKind::Ai => st.ai_usage_on(),
             PageKind::System => st.system_on(),
-            PageKind::Prayer => st.prayer_on(),
-            PageKind::Script => st.script_on(),
-            PageKind::Stocks => st.stocks_on(),
-            PageKind::Caffeine => st.caffeine_on(),
-            PageKind::Downloads => st.downloader_on(),
             PageKind::Record => st.record_on(),
             PageKind::Notifications => st.notifications_on(),
             p if p.hideable() => !st.tab_hidden(p) || open == Some(p),
@@ -298,23 +192,11 @@ pub fn content_height(p: PageKind, st: &AppState) -> f32 {
     match p {
         PageKind::Media => media::height(st),
         PageKind::Focus => focus::height(st),
-        PageKind::Ai => usage::height(st),
-        PageKind::Health => health::height(st),
-        PageKind::Ielts => ielts::height(st),
-        PageKind::Notes => notes::height(st),
         PageKind::Shelf => shelf::height(st),
         PageKind::Tasks => tasks::height(st),
-        PageKind::Today => today::height(st),
         PageKind::System => system::height(st),
-        PageKind::Script => script::height(st),
         PageKind::Record => record::height(st),
-        PageKind::Oyenza => oyenza::height(st),
-        PageKind::Prayer => prayer::height(st),
-        PageKind::Stocks => stocks::height(st),
-        PageKind::Caffeine => caffeine::height(st),
-        PageKind::Downloads => downloads::height(st),
         PageKind::Notifications => notifications::height(st),
-        PageKind::Addons => addons::height(st),
         PageKind::Settings => settings::height(st),
     }
 }
@@ -327,15 +209,8 @@ pub fn next_wake(page: PageKind, st: &AppState) -> Option<f64> {
     let wake = match page {
         PageKind::Tasks => tasks::next_wake(st),
         PageKind::Shelf => shelf::next_wake(st),
-        PageKind::Oyenza => oyenza::next_wake(st),
         PageKind::Settings => settings::next_wake(st),
-        PageKind::Script => script::next_wake(st),
         PageKind::Record => record::next_wake(st),
-        PageKind::Prayer => prayer::next_wake(st),
-        PageKind::Today => today::next_wake(st),
-        PageKind::Downloads => downloads::next_wake(st),
-        PageKind::Ielts => ielts::next_wake(st),
-        PageKind::Notes => notes::next_wake(st),
         _ => None,
     };
     // Oyen in the Oyenza tab (and beside the pin in his theme) blinks and
@@ -396,7 +271,6 @@ pub(crate) fn content_area(body: Rect) -> Rect {
 /// the new one fades in. Every theme's frame draws its pages with this, so
 /// a switch moves the same in all of them.
 pub(crate) fn draw_pages(ui: &mut Ui, st: &mut AppState, body: Rect, header: Rect, page: PageKind, tr: Option<PageTransition>) {
-    caffeine::put_away(ui, st);
     let area = content_area(body);
     // Content may reach a little above `area` (text boxes whose cap height,
     // not their line box, sits on the content top) but never into the tabs.
@@ -441,23 +315,11 @@ pub(crate) fn draw_page(ui: &mut Ui, st: &mut AppState, area: Rect, page: PageKi
     match page {
         PageKind::Media => media::draw(ui, st, area),
         PageKind::Focus => focus::draw(ui, st, area),
-        PageKind::Ai => usage::draw(ui, st, area),
-        PageKind::Health => health::draw(ui, st, area),
-        PageKind::Ielts => ielts::draw(ui, st, area),
-        PageKind::Notes => notes::draw(ui, st, area),
         PageKind::Shelf => shelf::draw(ui, st, area),
         PageKind::Tasks => tasks::draw(ui, st, area),
-        PageKind::Today => today::draw(ui, st, area),
         PageKind::System => system::draw(ui, st, area),
-        PageKind::Script => script::draw(ui, st, area),
         PageKind::Record => record::draw(ui, st, area),
-        PageKind::Oyenza => oyenza::draw(ui, st, area),
-        PageKind::Prayer => prayer::draw(ui, st, area),
-        PageKind::Stocks => stocks::draw(ui, st, area),
-        PageKind::Caffeine => caffeine::draw(ui, st, area),
-        PageKind::Downloads => downloads::draw(ui, st, area),
         PageKind::Notifications => notifications::draw(ui, st, area),
-        PageKind::Addons => addons::draw(ui, st, area),
         PageKind::Settings => settings::draw(ui, st, area),
     }
 }
@@ -578,19 +440,12 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
             ui.c.fill_rrect(tr, TAB_H / 2.0, palette::SURFACE);
             hover = Some((i, tr));
         }
-        if p == PageKind::Oyenza {
-            draw_oyen_tab(ui, st, r, tr);
-        } else {
-            let k = if active { e } else if from.tabbed() && i == fi { 1.0 - e } else { 0.0 };
-            let ic = if resp.hovered { palette::TEXT } else { Color::lerp(palette::TEXT_FAINT, palette::TEXT, k) };
-            let ix = snap(tr.x + (TAB_W - TAB_ICON) / 2.0, scale);
-            ui.c.icon(p.icon(), Rect::new(ix, snap(cy - TAB_ICON / 2.0, scale), TAB_ICON, TAB_ICON), ic);
-        }
+        let k = if active { e } else if from.tabbed() && i == fi { 1.0 - e } else { 0.0 };
+        let ic = if resp.hovered { palette::TEXT } else { Color::lerp(palette::TEXT_FAINT, palette::TEXT, k) };
+        let ix = snap(tr.x + (TAB_W - TAB_ICON) / 2.0, scale);
+        ui.c.icon(p.icon(), Rect::new(ix, snap(cy - TAB_ICON / 2.0, scale), TAB_ICON, TAB_ICON), ic);
         if resp.clicked && !active {
             st.cmd(Command::SetPage(p));
-            if p == PageKind::Oyenza {
-                st.ui.oyen_tab = Some((crate::oyen::TabMove::Picked, ui.now));
-            }
         }
     }
     if from.tabbed() && (fi != pi || !page.tabbed()) {
@@ -610,8 +465,7 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
     ui.c.text(&time, Rect::new(right - tw - 4.0, r.y, tw + 4.0, r.h), &time_st);
     let mut left = right - tw;
 
-    let shows_date = |p: PageKind| if p == PageKind::Today { 0.0 } else { 1.0 };
-    let date_k = lerp(shows_date(from), shows_date(page), e);
+    let date_k = 1.0;
     let date = fmt_date_short(&st.local);
     let date_st = TextStyle::footnote().color(palette::TEXT_DIM).right();
     let dw = ui.c.measure(&date, &date_st, 200.0).0;
@@ -754,7 +608,6 @@ pub fn empty_state(ui: &mut Ui, area: Rect, icon: Icon, title: &str, hint: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::OyenzaLink;
     use poni_core::settings::Settings;
     use poni_core::store::Store;
 
@@ -763,53 +616,9 @@ mod tests {
     }
 
     #[test]
-    fn the_row_is_the_island_s_own_pages_then_the_plus() {
-        use PageKind::*;
-        let mut st = state();
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Addons]);
-        // The add-ons' pages come before the "+".
-        for id in ["system", "script"] {
-            st.addons.insert(id, poni_core::addons::Status::Ready);
-        }
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, System, Script, Addons]);
-        // Clipboard left the app: an island last open there opens on Music.
-        assert_eq!(PageKind::from_key("clipboard"), Media);
-    }
-
-    #[test]
-    fn hidden_tabs_leave_the_row_but_not_while_their_page_is_open() {
-        use PageKind::*;
-        let mut st = state();
-        st.settings.hidden_tabs = vec!["today".into(), "tasks".into(), "addons".into()];
-        st.page = Focus;
-        // The "+" can't be hidden.
-        assert_eq!(tabs(&st), [Media, Shelf, Focus, Addons]);
-        assert_eq!(first_tab(&st), Media);
-        // Opened from elsewhere (a meeting's notice opens Today): its tab
-        // shows while it's open, and stepping on leaves it behind.
-        st.page = Today;
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Focus, Addons]);
-        st.page = step_tab(Today, &st, true);
-        assert_eq!(st.page, Shelf);
-        assert!(!tabs(&st).contains(&Today));
-        // Every one of them hidden: the island opens on Addons.
-        st.settings.hidden_tabs = PageKind::HIDEABLE.iter().map(|p| p.key().to_string()).collect();
-        st.page = Addons;
-        assert_eq!(tabs(&st), [Addons]);
-        assert_eq!(first_tab(&st), Addons);
-        // A start on a hidden page opens on the first tab instead.
-        let mut settings = poni_core::settings::Settings::default();
-        settings.start_page = "today".into();
-        settings.remember_page = false;
-        settings.hidden_tabs = vec!["media".into(), "today".into()];
-        assert_eq!(AppState::new(settings, Store::default()).page, Shelf);
-    }
-
-    #[test]
     fn settings_has_the_gear_not_a_tab() {
         let st = state();
         assert!(!tabs(&st).contains(&PageKind::Settings));
-        // Stepping through the tabs never lands on Settings.
         let mut p = PageKind::Media;
         for _ in 0..2 * PageKind::ALL.len() {
             p = step_tab(p, &st, true);
@@ -821,194 +630,5 @@ mod tests {
     fn settings_keeps_its_key_and_slides_in_from_the_right() {
         assert_eq!(PageKind::from_key("settings"), PageKind::Settings);
         assert!(PageKind::ALL.iter().all(|p| p.tab_index() <= PageKind::Settings.tab_index()));
-    }
-
-    #[test]
-    fn addons_is_the_last_tab_and_never_makes_the_window_taller() {
-        let mut st = state();
-        assert_eq!(tabs(&st).last(), Some(&PageKind::Addons));
-        assert_eq!(PageKind::from_key("addons"), PageKind::Addons);
-        // The window is as tall as the tallest page (System, laid out for
-        // whether it shows or not); the add-ons' rows and Stocks stay under it.
-        assert!(content_height(PageKind::Addons, &st) <= content_height(PageKind::System, &st));
-        assert!(content_height(PageKind::Stocks, &st) <= content_height(PageKind::System, &st));
-        assert!(content_height(PageKind::Caffeine, &st) <= content_height(PageKind::System, &st));
-        // Notifications with as many apps as it lists.
-        for i in 0..poni_core::notifications::MAX_APPS {
-            st.settings.notifications.remember(&format!("App.{i}"), &format!("App {i}"));
-        }
-        assert!(content_height(PageKind::Notifications, &st) <= content_height(PageKind::System, &st));
-    }
-
-    #[test]
-    fn system_and_stocks_have_a_tab_only_while_their_add_ons_are_on() {
-        for (page, addon) in [
-            (PageKind::System, poni_core::addons::SYSTEM),
-            (PageKind::Stocks, poni_core::addons::STOCKS),
-            (PageKind::Caffeine, poni_core::addons::CAFFEINE),
-        ] {
-            let mut st = state();
-            assert!(!tabs(&st).contains(&page), "{} is off for everyone until switched on", addon.id);
-            st.settings.set_addon(addon.id, true);
-            st.addons.insert(addon.id, poni_core::addons::Status::Ready);
-            assert!(tabs(&st).contains(&page));
-            // An island last open on its page opens on the first tab while it's off.
-            let store = Store { last_page: page.key().into(), ..Store::default() };
-            let mut settings = Settings { remember_page: true, ..Settings::default() };
-            assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
-            settings.set_addon(addon.id, true);
-            assert_eq!(AppState::new(settings, store).page, page);
-        }
-    }
-
-    #[test]
-    fn notifications_is_on_wherever_the_copy_can_read_them_until_switched_off() {
-        // The download can't read other apps' notifications: no tab, nothing listens.
-        let mut st = state();
-        assert!(!st.notifications_on() && !tabs(&st).contains(&PageKind::Notifications));
-        assert_eq!(hideable_tabs(&st), &PageKind::HIDEABLE[..5], "Settings doesn't offer it");
-        // The Store copy: on for everyone, without an add-on to switch on.
-        st.notify_can = true;
-        assert!(st.notifications_on() && tabs(&st).contains(&PageKind::Notifications));
-        assert_eq!(hideable_tabs(&st).last(), Some(&PageKind::Notifications));
-        // Its chip in Settings' tabs row switches it off, tab and all, even
-        // while its page is open.
-        st.settings.hidden_tabs = vec!["notifications".into()];
-        st.page = PageKind::Notifications;
-        assert!(!st.notifications_on() && !tabs(&st).contains(&PageKind::Notifications));
-        assert_eq!(first_tab(&st), PageKind::Media);
-    }
-
-    #[test]
-    fn downloads_has_a_tab_only_with_studio_pro() {
-        for (page, addon) in [(PageKind::Downloads, poni_core::addons::DOWNLOADER)] {
-            let mut st = state();
-            st.downloader_offered = true;
-            st.settings.set_addon(addon.id, true);
-            st.addons.insert(addon.id, poni_core::addons::Status::Ready);
-            assert!(!tabs(&st).contains(&page), "{}: signed out", addon.id);
-            st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
-            assert!(!tabs(&st).contains(&page), "{}: before the server's answer", addon.id);
-            st.oyenza.pro = Some(false);
-            assert!(!tabs(&st).contains(&page), "{}: an account without Pro", addon.id);
-            st.oyenza.pro = Some(true);
-            assert!(tabs(&st).contains(&page), "{}", addon.id);
-            // Signed out again: gone, whatever the server said before.
-            st.oyenza.link = OyenzaLink::Off;
-            assert!(!tabs(&st).contains(&page), "{}", addon.id);
-            // Pro isn't known yet at start: an island last open on its page opens on the first tab.
-            let store = Store { last_page: page.key().into(), ..Store::default() };
-            let mut settings = Settings { remember_page: true, ..Settings::default() };
-            settings.set_addon(addon.id, true);
-            assert_eq!(AppState::new(settings, store).page, PageKind::ALL[0], "{}", addon.id);
-        }
-    }
-
-    #[test]
-    fn today_keeps_its_tiles_only_for_a_server_without_the_day() {
-        use crate::state::AgendaState;
-        let mut st = state();
-        // Signed out: the sign-in card, so no stats are read for tiles.
-        assert!(!today::shows_tiles(&st));
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
-        assert!(!today::shows_tiles(&st), "getting the day");
-        st.oyenza.agenda_state = AgendaState::Unavailable;
-        assert!(today::shows_tiles(&st));
-        // The day for today, Calendar switched on: the day, and a look at the next minute.
-        let today = st.day_key();
-        st.oyenza.agenda = Some(poni_core::agenda::sample(&today, 600));
-        st.oyenza.agenda_state = AgendaState::Ready;
-        assert!(!today::shows_tiles(&st));
-        assert!(today::next_wake(&st).is_some_and(|t| t > st.now && t <= st.now + 60.0));
-    }
-
-    #[test]
-    fn prayer_has_a_tab_only_while_its_add_on_is_on_and_ready() {
-        let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Prayer));
-        st.addons.insert("sholat", poni_core::addons::Status::Ready);
-        assert!(!tabs(&st).contains(&PageKind::Prayer), "no places read yet");
-        let list = poni_core::prayer::PlaceList::parse(r#"{"places":[]}"#).unwrap();
-        st.prayer.places = Some(std::sync::Arc::new(list));
-        let row = tabs(&st);
-        assert_eq!(&row[row.len() - 2..], &[PageKind::Prayer, PageKind::Addons]);
-        assert!(content_height(PageKind::Prayer, &st) <= content_height(PageKind::Tasks, &st));
-        st.addons.insert("sholat", poni_core::addons::Status::Downloading { done: 1, total: 2 });
-        assert!(!tabs(&st).contains(&PageKind::Prayer));
-    }
-
-
-
-    #[test]
-    fn script_has_a_tab_only_while_its_add_on_is_on() {
-        let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Script), "off for everyone until switched on");
-        st.addons.insert("script", poni_core::addons::Status::Ready);
-        assert!(tabs(&st).contains(&PageKind::Script));
-        assert_eq!(tabs(&st).last(), Some(&PageKind::Addons));
-    }
-
-    #[test]
-    fn record_has_a_tab_once_the_recorder_is_installed() {
-        let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Record), "no recorder: no tab");
-        st.recorder = true;
-        assert!(!tabs(&st).contains(&PageKind::Record), "a recorder that never wrote (1.0.0) can't read Record's links");
-        st.store.recorder_island = true;
-        let row = tabs(&st);
-        if cfg!(target_os = "macos") {
-            assert!(!row.contains(&PageKind::Record), "Windows only for now");
-            return;
-        }
-        assert!(row.contains(&PageKind::Record), "installing the recorder is the switch");
-        assert_eq!(row.last(), Some(&PageKind::Addons));
-        st.settings.set_addon("recorder", false);
-        assert!(!tabs(&st).contains(&PageKind::Record), "switched off: gone");
-        st.settings.set_addon("recorder", true);
-        st.addons.insert("script", poni_core::addons::Status::Ready);
-        let row = tabs(&st);
-        let at = |p| row.iter().position(|t| *t == p).unwrap();
-        assert_eq!(at(PageKind::Record), at(PageKind::Script) + 1, "beside the Script page");
-    }
-
-    #[test]
-    fn neither_the_record_page_nor_six_add_ons_make_the_window_taller() {
-        let mut st = state();
-        st.recorder = true;
-        st.store.recorder_island = true;
-        let tallest = content_height(PageKind::System, &st);
-        assert!(content_height(PageKind::Record, &st) <= tallest);
-        assert!(content_height(PageKind::Addons, &st) <= tallest, "{} > {tallest}", content_height(PageKind::Addons, &st));
-    }
-
-    #[test]
-    fn an_island_last_on_the_script_page_opens_on_the_first_tab_once_it_is_off() {
-        let store = Store { last_page: "script".into(), ..Store::default() };
-        let mut settings = Settings { remember_page: true, ..Settings::default() };
-        assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
-        settings.set_addon("script", true);
-        assert_eq!(AppState::new(settings, store).page, PageKind::Script);
-    }
-
-    #[test]
-    fn settings_never_makes_the_window_taller() {
-        // The window fits the tallest page; System is always 256 DIPs (Settings
-        // has three rows of switches since Clipboard history left).
-        let mut st = state();
-        assert!(content_height(PageKind::Settings, &st) <= content_height(PageKind::System, &st));
-        // Nor its new version's row, nor the Update sheet in its place.
-        let rel = poni_core::update::Release {
-            version: "9.9.9".into(),
-            date: String::new(),
-            headline: "Something new".into(),
-            notes: String::new(),
-            windows: None,
-            mac: None,
-        };
-        st.update.offer = Some(rel);
-        let row = content_height(PageKind::Settings, &st);
-        st.update.sheet = true;
-        let sheet = content_height(PageKind::Settings, &st);
-        assert!(row <= content_height(PageKind::System, &st) && sheet <= row, "{row} {sheet}");
     }
 }

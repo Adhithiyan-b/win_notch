@@ -19,7 +19,6 @@
 
 use crate::commands::MediaCmd;
 use crate::events::{AppEvent, EventSink};
-use crate::services::applemusic_ui::AppleMusicUi;
 use crate::state::MediaSession;
 use poni_core::nowplaying::{self, Controls as Caps};
 use poni_core::timeline::{PendingSeek, Timeline};
@@ -394,9 +393,6 @@ struct Worker {
     pending_seek: Option<PendingSeek>,
     /// The controls a player last reported, as logged (session id, controls).
     logged_caps: Option<(String, Caps)>,
-    /// Apple Music's own slider and back button (it declines both from the
-    /// media session).
-    apple_ui: AppleMusicUi,
     /// Position jumps logged for the shown track so far.
     timeline_logs: u32,
     refresh_at: Option<Instant>,
@@ -427,7 +423,6 @@ impl Worker {
             force_timeline: false,
             pending_seek: None,
             logged_caps: None,
-            apple_ui: AppleMusicUi::default(),
             timeline_logs: 0,
             refresh_at: None,
             last_refresh: None,
@@ -952,15 +947,11 @@ impl Worker {
         let session = self.sessions[i].session.clone();
         let apple = nowplaying::is_apple_music(&self.sessions[i].aumid);
         if cmd == MediaCmd::Prepare {
-            if apple {
-                self.apple_ui.prepare_seek();
-            }
             return;
         }
         let result = match &cmd {
             MediaCmd::PlayPause => toggle_play_pause(&session),
             MediaCmd::Next => run_bool(session.TrySkipNextAsync()),
-            MediaCmd::Prev if apple => self.apple_back(&session),
             MediaCmd::Prev => run_bool(session.TrySkipPreviousAsync()),
             MediaCmd::Prepare => return,
             MediaCmd::Seek(s) => {
@@ -969,7 +960,7 @@ impl Worker {
                 }
                 let duration = self.shown.as_ref().map_or(0.0, |sh| sh.timeline.duration_s);
                 let secs = if duration > 0.0 { s.clamp(0.0, duration) } else { s.max(0.0) };
-                let result = if apple { self.apple_seek(&session, secs, duration) } else { self.session_seek(&session, secs) };
+                let result = self.session_seek(&session, secs);
                 self.pending_seek = matches!(result, Ok(true)).then(|| PendingSeek::new(secs, crate::clock::mono()));
                 result
             }
@@ -992,38 +983,6 @@ impl Worker {
     fn session_seek(&self, session: &Session, secs: f64) -> Result<bool, OpErr> {
         let ticks = ((secs * TICKS_PER_S).round() as i64).saturating_add(self.start_ticks);
         run_bool(session.TryChangePlaybackPositionAsync(ticks))
-    }
-
-    /// Apple Music declines seeks from the media session: move its own
-    /// progress slider, and ask the session only when the slider can't be
-    /// reached.
-    fn apple_seek(&mut self, session: &Session, secs: f64, duration: f64) -> Result<bool, OpErr> {
-        if duration > 0.0 {
-            match self.apple_ui.seek(secs / duration) {
-                Ok(()) => {
-                    crate::pinfo!("media: moved Apple Music's own progress slider to {secs:.1} s");
-                    return Ok(true);
-                }
-                Err(e) => crate::pinfo!("media: Apple Music's progress slider: {e}; asking its media session"),
-            }
-        }
-        self.session_seek(session, secs)
-    }
-
-    /// Apple Music usually reports Previous as off: press its own back button
-    /// (restart the song, or go back one), and ask the media session only when
-    /// the button can't be reached.
-    fn apple_back(&mut self, session: &Session) -> Result<bool, OpErr> {
-        match self.apple_ui.skip_back() {
-            Ok(()) => {
-                crate::pinfo!("media: pressed Apple Music's own back button");
-                Ok(true)
-            }
-            Err(e) => {
-                crate::pinfo!("media: Apple Music's back button: {e}; asking its media session");
-                run_bool(session.TrySkipPreviousAsync())
-            }
-        }
     }
 }
 

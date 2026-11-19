@@ -7,8 +7,6 @@
 //! both renderers would start it where the last segment ended.
 //! Geometry is parsed once and cached by [`crate::gfx::Gfx`].
 
-use studio_usage::ProviderId;
-
 pub const STROKE: f32 = 2.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -135,24 +133,6 @@ pub enum Icon {
     /// A padlock: an IELTS level not open yet. (The IELTS tab and its answer
     /// button use `Mic`, the Record page's microphone.)
     Lock,
-}
-
-/// A service's mark, for its card on the AI tab and its notices.
-pub fn service(id: ProviderId) -> Icon {
-    match id {
-        ProviderId::Codex => Icon::OpenAi,
-        ProviderId::Claude => Icon::Claude,
-        ProviderId::OpenCode => Icon::OpenCode,
-        ProviderId::Gemini => Icon::Gemini,
-        ProviderId::Antigravity => Icon::Antigravity,
-        ProviderId::Cursor => Icon::Cursor,
-        ProviderId::Copilot => Icon::Copilot,
-        ProviderId::Kimi => Icon::Kimi,
-        ProviderId::Zai => Icon::Zai,
-        ProviderId::MiniMax => Icon::MiniMax,
-        ProviderId::OpenRouter => Icon::OpenRouter,
-        ProviderId::Oyenza => Icon::Oyenza,
-    }
 }
 
 pub struct Part {
@@ -514,15 +494,6 @@ mod tests {
                     assert!(matches!(next, None | Some('M' | 'm')), "{i:?}: the figure after byte {at} has no M");
                 }
             }
-        }
-    }
-
-    #[test]
-    fn every_service_has_a_mark_of_its_own() {
-        let marks: Vec<Icon> = ProviderId::ALL.into_iter().map(service).collect();
-        for (n, i) in marks.iter().enumerate() {
-            assert!(!marks[..n].contains(i), "{i:?} twice");
-            assert!(!parts(*i).is_empty());
         }
     }
 

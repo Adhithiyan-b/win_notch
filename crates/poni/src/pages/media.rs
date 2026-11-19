@@ -28,7 +28,6 @@ use poni_core::datetime::fmt_duration;
 use poni_core::geom::{lerp, palette, Color, Point, Rect};
 use poni_core::lrc::Lyrics;
 use poni_core::nowplaying::lyrics_lead_s;
-use poni_core::romanize::Ruby;
 use poni_core::timeline::LyricClock;
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -173,8 +172,6 @@ pub(crate) struct Anim {
     env: (u32, u32),
     /// (row, size × 4) → measured (width, height) of a wrapped lyric line.
     sizes: HashMap<(usize, u16), (f32, f32)>,
-    /// (row, size × 4) → where the pieces of a pronounced line go.
-    rubies: HashMap<(usize, u16), RubyLay>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -657,16 +654,14 @@ pub(crate) fn draw_lyrics(
         a.set_sig(ctx.track_key, shown);
         a.clock.reset();
         a.sizes.clear();
-        a.rubies.clear();
         a.lyric_vel = 0.0;
         a.scroll_target = 0.0;
         a.scroll_vel = 0.0;
     }
     let env = (col.w.to_bits(), ctx.scale.to_bits());
-    if a.env != env || a.sizes.len() + a.rubies.len() > MAX_CACHE {
+    if a.env != env || a.sizes.len() > MAX_CACHE {
         a.env = env;
         a.sizes.clear();
-        a.rubies.clear();
     }
 
     let vp = Rect::new(col.x, col.y, col.w, col.h - CREDIT_H - CREDIT_GAP);
@@ -680,11 +675,11 @@ pub(crate) fn draw_lyrics(
         }
         View::Synced(l) => {
             out.synced = true;
-            out.animating = draw_synced(ui, l, &lyr.ruby, pui, vp, a, fr, fresh, ctx, acts);
+            out.animating = draw_synced(ui, l, pui, vp, a, fr, fresh, ctx, acts);
             format!("Lyrics: {source}")
         }
         View::Plain(l) => {
-            out.animating = draw_plain(ui, l, &lyr.ruby, pui, vp, a, fr, fresh, ctx);
+            out.animating = draw_plain(ui, l, pui, vp, a, fr, fresh, ctx);
             format!("Lyrics: {source} \u{b7} Unsynced")
         }
     };
@@ -790,84 +785,7 @@ struct Placed {
     roman_w: f32,
 }
 
-/// Where the pieces of a pronounced line go.
-#[derive(Clone, Default)]
-struct RubyLay {
-    pieces: Vec<Placed>,
-    w: f32,
-    h: f32,
-}
 
-/// Height of one line of pieces with their readings.
-fn ruby_line_h(size: f32) -> f32 {
-    let rs = roman_style(size).size;
-    size * LYRIC_LEADING + ROMAN_GAP + rs * 1.25
-}
-
-/// Lay the pieces out left to right, each as wide as the wider of its text
-/// and its reading, wrapping whole pieces at `wrap_w`. Spaces between words
-/// become the same gap as the one set between pieces.
-fn layout_ruby(ui: &mut Ui, pieces: &[Ruby], size: f32, wrap_w: f32) -> RubyLay {
-    let (ps, rs) = (piece_style(size), roman_style(size));
-    let line_h = ruby_line_h(size);
-    let gap = (size * PIECE_GAP).round();
-    let space = ui.c.measure("a a", &ps, 10_000.0).0 - ui.c.measure("aa", &ps, 10_000.0).0;
-    let mut lay = RubyLay { pieces: Vec::with_capacity(pieces.len()), ..Default::default() };
-    let (mut x, mut y, mut any) = (0.0f32, 0.0f32, false);
-    for p in pieces {
-        // A run with no reading (English inside a Korean line, say) wraps
-        // word by word like ordinary text; a piece with a reading stays whole.
-        let words: Vec<&str> = if p.roman.is_empty() { p.text.split_whitespace().collect() } else { vec![p.text.trim()] };
-        for (i, text) in words.into_iter().enumerate() {
-            if text.is_empty() {
-                continue;
-            }
-            let tw = ui.c.measure(text, &ps, 10_000.0).0;
-            let rw = if p.roman.is_empty() { 0.0 } else { ui.c.measure(&p.roman, &rs, 10_000.0).0 };
-            let w = tw.max(rw);
-            if any {
-                x += if i > 0 { space } else { gap };
-            }
-            if any && x + w > wrap_w {
-                x = 0.0;
-                y += line_h + RUBY_LINE_GAP;
-            }
-            lay.pieces.push(Placed { text: text.to_string(), roman: p.roman.clone(), x, y, text_w: tw, roman_w: rw });
-            x += w;
-            lay.w = lay.w.max(x.min(wrap_w));
-            any = true;
-        }
-    }
-    lay.h = y + line_h;
-    lay
-}
-
-/// A pronounced line's layout, cached per (row, size) for the current lyrics.
-fn measure_ruby(ui: &mut Ui, a: &mut Anim, row: usize, size: f32, pieces: &[Ruby], wrap_w: f32) -> (f32, f32) {
-    let key = (row, (size * 4.0).round() as u16);
-    if let Some(l) = a.rubies.get(&key) {
-        return (l.w, l.h);
-    }
-    let l = layout_ruby(ui, pieces, size, wrap_w);
-    let v = (l.w, l.h);
-    a.rubies.insert(key, l);
-    v
-}
-
-/// Draw a pronounced line measured by [`measure_ruby`] with its top left at
-/// (`x`, `y`): each piece in lyric type, its reading small under it.
-fn draw_ruby(ui: &mut Ui, a: &Anim, row: usize, size: f32, x: f32, y: f32, alpha: f32) {
-    let Some(lay) = a.rubies.get(&(row, (size * 4.0).round() as u16)) else { return };
-    let ps = piece_style(size).color(Color::white(alpha));
-    let rs = roman_style(size).color(Color::white(alpha * ROMAN_ALPHA));
-    let text_h = size * LYRIC_LEADING;
-    for p in &lay.pieces {
-        ui.c.text(&p.text, Rect::new(x + p.x, y + p.y, p.text_w + 2.0, text_h + 2.0), &ps);
-        if p.roman_w > 0.0 {
-            ui.c.text(&p.roman, Rect::new(x + p.x, y + p.y + text_h + ROMAN_GAP, p.roman_w + 2.0, rs.size * 1.25 + 2.0), &rs);
-        }
-    }
-}
 
 /// One row of the synced view (a line, or an instrumental/intro gap).
 struct Row<'a> {
@@ -883,8 +801,6 @@ struct Row<'a> {
     /// Height of the layout box at `size_q` (`h` is its scaled height).
     lay_h: f32,
     text: &'a str,
-    /// The line's pieces with their readings, when it is shown pronounced.
-    ruby: Option<&'a [Ruby]>,
     wrap_w: f32,
     w: f32,
     h: f32,
@@ -942,7 +858,6 @@ fn shown_distances(rs: &[usize], open: &[f32], p: f32) -> Vec<f32> {
 fn draw_synced(
     ui: &mut Ui,
     l: &Lyrics,
-    rubies: &[Vec<Ruby>],
     pui: &mut PageUiState,
     vp: Rect,
     a: &mut Anim,
@@ -995,14 +910,13 @@ fn draw_synced(
         let (size, size_q) = lyric_size(1.0 - d);
         let k = size / size_q;
         let text = text_of(r);
-        let ruby = if ctx.pronounce && !text.is_empty() { rubies.get(r - off).map(Vec::as_slice).filter(|p| !p.is_empty()) } else { None };
         let wrap_w = vp.w * size_q / LYRIC_MAX;
-        let (w, lay_h) = match ruby {
-            _ if text.is_empty() => (dots_width(size) / k, size_q * LYRIC_LEADING * open),
-            Some(p) => measure_ruby(ui, a, r, size_q * RUBY_SIZE, p, wrap_w),
-            None => measure_row(ui, a, r, size_q, text, wrap_w),
+        let (w, lay_h) = if text.is_empty() {
+            (dots_width(size) / k, size_q * LYRIC_LEADING * open)
+        } else {
+            measure_row(ui, a, r, size_q, text, wrap_w)
         };
-        rows.push(Row { r, d, size, size_q, k, lay_h, text, ruby, wrap_w, w: w * k, h: lay_h * k, open, c: 0.0 });
+        rows.push(Row { r, d, size, size_q, k, lay_h, text, wrap_w, w: w * k, h: lay_h * k, open, c: 0.0 });
     }
     let ik = k - lo;
     for i in ik + 1..rows.len() {
@@ -1076,12 +990,8 @@ fn draw_synced(
             if row.k != 1.0 {
                 ui.c.scale_about(Point::new(vp.x, y), row.k);
             }
-            if row.ruby.is_some() {
-                draw_ruby(ui, a, row.r, row.size_q * RUBY_SIZE, vp.x, y, alpha);
-            } else {
-                let ts = lyric_style(row.size_q).color(Color::white(alpha)).top();
-                ui.c.text(row.text, Rect::new(vp.x, y, row.wrap_w, row.lay_h + 2.0), &ts);
-            }
+            let ts = lyric_style(row.size_q).color(Color::white(alpha)).top();
+            ui.c.text(row.text, Rect::new(vp.x, y, row.wrap_w, row.lay_h + 2.0), &ts);
             ui.c.restore_transform(m0);
         }
     }
@@ -1112,7 +1022,6 @@ fn draw_dots(ui: &mut Ui, x: f32, cy: f32, size: f32, alpha: f32, lit: Option<f3
 fn draw_plain(
     ui: &mut Ui,
     l: &Lyrics,
-    rubies: &[Vec<Ruby>],
     pui: &mut PageUiState,
     vp: Rect,
     a: &mut Anim,
@@ -1125,15 +1034,14 @@ fn draw_plain(
     let start = lines.iter().position(|x| !x.text.trim().is_empty()).unwrap_or(lines.len());
     let end = (start + PLAIN_MAX_LINES).min(lines.len());
     let shown = &lines[start..end];
-    let pieces = |i: usize| if ctx.pronounce { rubies.get(start + i).map(Vec::as_slice).filter(|p| !p.is_empty()) } else { None };
 
     let mut heights: Vec<f32> = Vec::with_capacity(shown.len());
-    for (i, line) in shown.iter().enumerate() {
+    for line in shown.iter() {
         let text = line.text.trim();
-        let h = match pieces(i) {
-            _ if text.is_empty() => STANZA_GAP,
-            Some(p) => measure_ruby(ui, a, i, PLAIN_SIZE, p, vp.w).1,
-            None => measure_row(ui, a, i, PLAIN_SIZE, text, vp.w).1,
+        let h = if text.is_empty() {
+            STANZA_GAP
+        } else {
+            measure_row(ui, a, 0, PLAIN_SIZE, text, vp.w).1
         };
         heights.push(h);
     }
@@ -1163,7 +1071,7 @@ fn draw_plain(
     ui.c.clip(vp);
     let snap_was = ui.c.set_text_snap(settled);
     let mut y = if settled { snap(vp.y - offset, scale) } else { vp.y - offset };
-    for (i, (line, &h)) in shown.iter().zip(&heights).enumerate() {
+    for (line, &h) in shown.iter().zip(&heights) {
         if y > vp.bottom() {
             break;
         }
@@ -1174,10 +1082,7 @@ fn draw_plain(
             let fb = lerp(1.0, smoothstep((vp.bottom() - cy) / EDGE_FADE), bottom_k);
             let alpha = palette::TEXT_DIM.a * ft * fb;
             if alpha > 0.01 {
-                match pieces(i) {
-                    Some(_) => draw_ruby(ui, a, i, PLAIN_SIZE, vp.x, y, alpha),
-                    None => ui.c.text(text, Rect::new(vp.x, y, vp.w, h + 2.0), &ts.color(Color::white(alpha))),
-                }
+                ui.c.text(text, Rect::new(vp.x, y, vp.w, h + 2.0), &ts.color(Color::white(alpha)));
             }
         }
         y += h + PLAIN_GAP;

@@ -3,8 +3,8 @@
 
 use crate::activities::{self, Mode};
 use crate::clock;
-use crate::commands::{Command, MediaCmd, NotifyCmd, OyenzaCmd, PairCmd, PhoneCmd, UsageCmd};
-use crate::events::{AppEvent, AppleMusicStatus, EventSink, OyenzaEvent, SendHwnd, WM_APP_APPBAR, WM_APP_EVENT, WM_APP_FRAME, WM_APP_TRAY};
+use crate::commands::{Command, MediaCmd, NotifyCmd, PhoneCmd};
+use crate::events::{AppEvent, EventSink, SendHwnd, WM_APP_APPBAR, WM_APP_EVENT, WM_APP_FRAME, WM_APP_TRAY};
 use crate::gfx::{px_rect, px_union, scale_about, union_rect, Canvas, Gfx, HitMask};
 use crate::icons::Icon;
 use crate::island::{Geom, Island, SHOULDER};
@@ -17,8 +17,8 @@ use crate::services::{self, Services};
 use crate::settings_host::{self, SettingsWindow};
 use crate::settings_window::Section;
 use crate::state::{
-    AppState, FpsAccess, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, Notice, NoticeAction, NotifyAccess, OyenzaLink, PairedPhone, PhoneAsk,
-    PhoneDrop, PhoneTransfer, PhoneView, PrayerState,
+    AppState, FpsAccess, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, Notice, NoticeAction, NotifyAccess, PairedPhone, PhoneAsk,
+    PhoneDrop, PhoneTransfer, PhoneView,
 };
 use crate::tray::{self, Tray};
 use crate::ui::{wid, CursorKind, Hit, Input, KeyInput, MouseButton, Ui};
@@ -28,11 +28,8 @@ use poni_core::spot;
 use poni_core::addons::Status as AddonStatus;
 use poni_core::frametime::{ambient_divisor, MotionStats};
 use poni_core::geom::{palette, Color, Point, Rect};
-use poni_core::oyenza;
-use poni_core::pairdrop::{MeetEvent, PeerEvent};
 use poni_core::phonedrop::{Event as PhoneEvent, QrMatrix};
-use poni_core::prayer::{Due, PlaceList, Prayer, PrayerMoment};
-use poni_core::settings::{IdleStyle, PrayerSound, Settings, Theme};
+use poni_core::settings::{IdleStyle, Settings, Theme};
 use poni_core::settings::MonitorChoice;
 use poni_core::store::{load_json, parse_json, save_json_atomic, LoadOutcome, Store};
 use std::cell::{Cell, RefCell};
@@ -69,8 +66,6 @@ const TIMER_UPDATE: usize = 11;
 const PEEK_S: f64 = 5.0;
 const DROP_PEEK_EVERY_S: f64 = 30.0;
 const HOTKEY_PEEK: i32 = 1;
-/// Alt+Shift+S pauses and resumes the Script page's reading from any app.
-const HOTKEY_SCRIPT: i32 = 2;
 /// Ctrl+Alt+F toggles the real-time frame time, missed-vblank & spring debug HUD.
 const HOTKEY_DEBUG: i32 = 3;
 /// Ctrl+Alt+B starts the 60-second automated benchmark loop.
@@ -89,8 +84,6 @@ const WM_WTSSESSION_CHANGE_: u32 = 0x02B1;
 const WTS_SESSION_LOCK_: usize = 7;
 const WTS_SESSION_UNLOCK_: usize = 8;
 
-/// Steps for copying the Apple Music token (README).
-const APPLE_MUSIC_HELP_URL: &str = "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
 /// Phone drop closes itself after this long without a request from a phone.
 const PHONE_IDLE_S: f64 = 600.0;
 
@@ -150,12 +143,6 @@ pub fn main_entry() -> i32 {
     }
     if crate::autostart::packaged() {
         pinfo!("running as the Microsoft Store package");
-    }
-    // Install on next start: the new version's Setup, downloaded and checked
-    // earlier, runs now, before any window, and opens the new version.
-    if selftest_dir.is_none() && !crate::autostart::packaged() && crate::updates::pending_install() {
-        unsafe { OleUninitialize() };
-        return 0;
     }
     let code = match run(selftest_dir, is_bench) {
         Ok(code) => code,
@@ -355,7 +342,7 @@ fn run_deferred(d: Deferred) {
             let Some((helper, items)) = with_app(|app| {
                 // Right-clicked on the open island (the tray's menu leaves it as it is).
                 app.menu_open = app.expanded && app.hovering;
-                (app.helper, tray::menu_items(&app.st.settings, app.st.pinned, &app.st.oyenza.link, crate::services::recorder::installed(), crate::updates::menu_line(&app.st, app.updater.is_some())))
+                (app.helper, tray::menu_items(&app.st.settings, app.st.pinned, crate::services::recorder::installed()))
             }) else {
                 return;
             };
@@ -393,32 +380,11 @@ pub struct App {
     services: Option<Services>,
     /// The Glass theme's screen copy, light/dark choice and glass.
     glass: crate::glass::Glass,
-    /// Prayer times' adzan, while it plays.
-    adzan: services::adzan::AdzanPlayer,
     /// Caffeine's reminder before last call: its minute and the day it showed.
     last_call: crate::last_call::Reminder,
-    /// The IELTS page's calls, microphone and voice (each only while needed).
-    ielts: services::ielts::Kit,
-    /// Music that played was paused for the IELTS session (it plays again after).
-    ielts_music: bool,
-    /// The IELTS page was on screen at the last tick (the coach is told when it comes and goes).
-    ielts_shown: bool,
-    /// An IELTS session held the island open at the last tick.
-    ielts_held: bool,
-    /// The Notes page's meeting while it is recorded (only then).
-    notes_rec: Option<services::notes::Recording>,
-    /// The meeting's audio once stopped, kept until its notes are saved (or
-    /// it is thrown away), for Try again.
-    notes_take: Option<services::notes::Take>,
-    /// When the meeting being taken down began (local time, for its notes).
-    notes_started: poni_core::datetime::LocalDateTime,
-    /// The self-test's own notes server and key, in place of api.oyenza.app
-    /// and this PC's sign-in.
-    pub(crate) notes_api: Option<(String, String)>,
     /// The self-test runs (for the whole run: `selftest` itself is taken out
-    /// while a step runs), and its IELTS turn is under way.
+    /// while a step runs).
     in_selftest: bool,
-    ielts_turn: bool,
     /// The glass was still changing on the last frame (turning light or dark).
     glass_moving: bool,
     /// Animation time of the last frame (the vblank it was shown on).
@@ -474,14 +440,7 @@ pub struct App {
     sysmon_on: bool,
     /// What the System reader was last told about nobody being there and battery saver.
     sysmon_rest: poni_core::sysmon::Rest,
-    /// The Oyenza page is on screen: its day list stays live (`services::oyenza`).
-    oyenza_watch: bool,
     /// The Stocks page was on screen at the last look (`set_stocks_watch`).
-    stocks_open: bool,
-    /// The Today page is on screen: the worker asks for the day (`services::oyenza`).
-    today_watch: bool,
-    /// What the AI tab's worker was last told (`set_usage_watch`).
-    usage_watch: services::usage::Watch,
     /// Show over games: the game's frames, counted while the readout shows.
     frames: Option<services::frames::Frames>,
     /// The process whose frames count (the full-screen app).
@@ -501,16 +460,8 @@ pub struct App {
     frame_history: Vec<f32>,
     missed_vblanks: u64,
     peek_hotkey: bool,
-    /// Alt+Shift+S is registered (only while the Script page can read).
-    script_hotkey: bool,
-    /// The Script page has asked for the island to stay out of screen capture.
-    script_excluded: bool,
     /// A recording has asked for the island to stay out of screen capture.
     rec_excluded: bool,
-    /// A reading held the island open at the last tick.
-    script_held: bool,
-    /// The Script page was on screen at the last tick.
-    script_shown: bool,
     /// App icons the System page asked for and hasn't got yet (the Shelf's
     /// thumbnail worker answers both pages with the same event).
     icon_wait: HashSet<String>,
@@ -554,8 +505,6 @@ pub struct App {
     phone: Option<services::phonedrop::PhoneDrop>,
     /// The Shelf paths last handed to it (to notice changes).
     phone_offer: Vec<String>,
-    /// The Shelf paths last handed to the paired-phones service.
-    pair_offer: Option<Vec<String>>,
     /// Whether the island floated when the window was last laid out (its
     /// room differs: see `sync_room`).
     laid_floating: bool,
@@ -564,9 +513,6 @@ pub struct App {
     laid_spot: Option<f32>,
     /// A press on the closed island, which a sideways move turns into a drag.
     grab: Option<Grab>,
-    /// New versions (`crate::updates`); None in the self-test and in a
-    /// Store copy, which the Store updates.
-    updater: Option<crate::updates::Updater>,
     /// Notifications' listener while it is on; None while it's
     /// off, in the download (no package identity) and in the self-test.
     notify: Option<services::notifications::Listener>,
@@ -754,18 +700,8 @@ impl App {
             rx,
             services: None,
             glass: crate::glass::Glass::new(services::apps_use_light_theme()),
-            adzan: Default::default(),
             last_call: Default::default(),
-            ielts: Default::default(),
-            ielts_music: false,
-            ielts_shown: false,
-            ielts_held: false,
-            notes_rec: None,
-            notes_take: None,
-            notes_started: Default::default(),
-            notes_api: None,
             in_selftest: selftest.is_some(),
-            ielts_turn: false,
             glass_moving: false,
             last_frame_t: 0.0,
             surface: Surface::default(),
@@ -792,10 +728,7 @@ impl App {
             sysmon: None,
             sysmon_on: false,
             sysmon_rest: poni_core::sysmon::Rest::default(),
-            oyenza_watch: false,
             stocks_open: false,
-            today_watch: false,
-            usage_watch: services::usage::Watch::default(),
             frames: None,
             game_pid: None,
             game_peek_until: 0.0,
@@ -806,11 +739,7 @@ impl App {
             frame_history: Vec::with_capacity(128),
             missed_vblanks: 0,
             peek_hotkey: false,
-            script_hotkey: false,
-            script_excluded: false,
             rec_excluded: false,
-            script_held: false,
-            script_shown: false,
             icon_wait: HashSet::new(),
             tray: None,
             taskbar_created_msg,
@@ -835,11 +764,9 @@ impl App {
             menu_open: false,
             phone: None,
             phone_offer: Vec::new(),
-            pair_offer: None,
             laid_floating: false,
             laid_spot: None,
             grab: None,
-            updater: None,
             notify: None,
         })
     }
@@ -850,10 +777,8 @@ impl App {
         self.st.power = services::power::query();
         services::power::register(self.helper);
         if !fake {
-            self.services = Some(Services::start(&self.sink, self.hwnd, self.helper, &self.st.settings, self.oyenza_activity()));
+            self.services = Some(Services::start(&self.sink, self.hwnd, self.helper, &self.st.settings));
             self.sync_top_watch();
-            self.st.paired = self.services.as_ref().map(|s| paired_phones(s.pairs())).unwrap_or_default();
-            self.sync_pair_offer();
             if self.st.settings.system_history_on() {
                 self.start_sysmon();
             }
@@ -868,13 +793,8 @@ impl App {
             if self.st.notifications_on() {
                 self.start_notify(false);
             }
-            if self.st.notes_on() {
-                self.notes_restore();
-            }
             self.try_add_tray();
             services::power::register_session(self.helper);
-            // Remote auto-updater disabled for zero unsolicited network calls.
-            self.updater = None;
         }
         if let Err(e) = dragdrop::register(self.hwnd, self.sink.clone()) {
             pwarn!("drop target registration failed: {e}");
@@ -897,7 +817,6 @@ impl App {
         // Stops the frame count's trace session (it would outlive Poni).
         self.frames = None;
         self.set_peek_hotkey(false);
-        self.set_script_hotkey(false);
         self.glass.stop(self.hwnd, &mut self.gfx);
         if let Some(p) = self.phone.take() {
             p.stop();
@@ -1296,10 +1215,6 @@ impl App {
                         // release can't click the pill a second time.
                         self.input.pressed_id = None;
                         self.run_inline_action(a);
-                    } else if self.input.pressed_id == Some(wid(activities::PRAYER_OK_ID)) {
-                        // The prayer countdown's OK, the same way.
-                        self.input.pressed_id = None;
-                        self.prayer_countdown_ok();
                     } else if self.input.pressed_id == Some(wid(pill::diorama::BALL_ID)) {
                         // Diorama's glass ball: in hand until the button comes
                         // up, sliding with the pointer; the island neither
@@ -1561,11 +1476,8 @@ impl App {
                 }
                 let p = services::power::query();
                 self.on_event(AppEvent::Power(p));
-                self.tell_oyenza_activity();
                 self.tell_sysmon_rest();
                 self.set_stocks_watch();
-                self.set_usage_watch();
-                self.update_due();
                 self.request_frame();
                 Some(LRESULT(1))
             }
@@ -1575,11 +1487,8 @@ impl App {
                     WTS_SESSION_UNLOCK_ => self.locked = false,
                     _ => {}
                 }
-                self.tell_oyenza_activity();
                 self.tell_sysmon_rest();
                 self.set_stocks_watch();
-                self.set_usage_watch();
-                self.update_due();
                 self.request_frame();
                 Some(LRESULT(0))
             }
@@ -1655,9 +1564,6 @@ impl App {
                 }
             },
         }
-        if self.settings_win.as_ref().is_some_and(|w| w.view.section == Section::Addons) {
-            self.oyenza(OyenzaCmd::CheckPro);
-        }
         self.paint_settings(deferred);
     }
 
@@ -1677,14 +1583,10 @@ impl App {
             let Some(w) = self.settings_win.as_mut() else { return };
             let before = w.view.section;
             let out = w.paint(&mut self.st, now, None, false);
-            let after = w.view.section;
+            let _after = w.view.section;
             if out.close {
                 self.close_settings_window();
                 return;
-            }
-            // Add-ons lists IELTS and Meeting notes by the account's Pro, as its tab does.
-            if after != before && after == Section::Addons {
-                self.oyenza(OyenzaCmd::CheckPro);
             }
             let ran = !self.st.cmds.is_empty();
             if ran {
@@ -1860,9 +1762,6 @@ impl App {
                     // pointer so the pill can be clicked (a click on the rest
                     // of the notice still opens its page). The dwell stays
                     // armed: the next movement restarts it.
-                } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID)) {
-                    // So does the prayer countdown under a pointer resting on
-                    // its OK (resting on the rest of it still opens).
                 } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(pill::diorama::BALL_ID)) {
                     // And Diorama's resting pill under a pointer resting on its
                     // glass ball, which is there to be slid.
@@ -1952,141 +1851,7 @@ impl App {
         self.request_frame();
     }
 
-    /// Save the Apple Music token copied from the browser (sealed with DPAPI)
-    /// and take it off the clipboard.
-    fn use_apple_music_token(&mut self) {
-        let text = services::clipboard::read_text(self.hwnd).unwrap_or_default();
-        let Some(token) = poni_core::applemusic::clean_user_token(&text) else {
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "No Apple Music token copied", "Copy media-user-token first", 6.0, None);
-            return;
-        };
-        if let Err(e) = services::secret::save(&paths::apple_music_token_path(), &token) {
-            pwarn!("apple music: cannot save the token ({e})");
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "Couldn't save the token", "Details in poni.log", 5.0, None);
-            return;
-        }
-        pinfo!("apple music: token saved");
-        services::clipboard::set_text(self.helper, "");
-        if let Some(s) = self.services.as_ref() {
-            s.apple_music_token_changed();
-        }
-        self.refetch_lyrics();
-        self.st.notify(Icon::Lyrics, palette::BLUE, "Checking the Apple Music token", "One moment", 4.0, None);
-    }
-
-    fn forget_apple_music_token(&mut self) {
-        if let Err(e) = services::secret::delete(&paths::apple_music_token_path()) {
-            pwarn!("apple music: cannot remove the token ({e})");
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "Couldn't remove the token", "Details in poni.log", 5.0, None);
-            return;
-        }
-        pinfo!("apple music: token removed");
-        if let Some(s) = self.services.as_ref() {
-            s.apple_music_token_changed();
-        }
-        self.refetch_lyrics();
-        self.st.notify(Icon::Lyrics, palette::BLUE, "Apple Music lyrics off", "Lyrics from LRCLIB only", 4.0, None);
-    }
-
-    fn on_apple_music(&mut self, status: AppleMusicStatus) {
-        let (color, title, subtitle) = match status {
-            AppleMusicStatus::Accepted => (palette::GREEN, "Apple Music lyrics on", "LRCLIB fills in the rest"),
-            AppleMusicStatus::Rejected => (palette::ORANGE, "Apple Music token not accepted", "Copy a fresh one from music.apple.com"),
-            AppleMusicStatus::Unreachable => (palette::ORANGE, "Can't reach Apple Music", "Token saved; trying again later"),
-            AppleMusicStatus::NoAccess => (palette::ORANGE, "No lyrics from Apple Music", "They need an Apple Music subscription"),
-        };
-        self.st.notify(Icon::Lyrics, color, title, subtitle, 6.0, None);
-    }
-
-    // ------------------------------------------------------------ AI usage
-
-    /// The AI tab's worker reads while the tab is on screen, or every few
-    /// minutes for the person who switched on its heads-up notices; both rest
-    /// while nobody is at the PC, the notices also on battery saver. Its
-    /// thread starts the first time either wants it (`Services::usage_watch`).
-    fn set_usage_watch(&mut self) {
-        // The self-test's scenes show made-up readings: nothing is read.
-        let here = !self.locked && !self.display_off && self.selftest.is_none();
-        let w = services::usage::Watch {
-            open: here && self.mode == Mode::Expanded(PageKind::Ai),
-            notices: here && self.st.settings.usage.notices && self.st.ai_usage_on() && !self.st.power.saver,
-            near_pct: self.st.settings.usage.near_pct,
-            use_24h: self.st.settings.use_24h,
-            hidden: services::usage::picked(&self.st.settings.usage.hidden),
-            added: services::usage::picked(&self.st.settings.usage.added),
-        };
-        // Already told: nothing to do, every frame.
-        if w == self.usage_watch {
-            return;
-        }
-        self.usage_watch = w;
-        if let Some(s) = self.services.as_ref() {
-            s.usage_watch(w);
-        }
-    }
-
-    /// Hide and Show change the AI tab's settings; the rest is its worker's.
-    fn usage_cmd(&mut self, c: UsageCmd) {
-        match c {
-            UsageCmd::Hide(id) | UsageCmd::Show(id) => {
-                let u = &mut self.st.settings.usage;
-                u.hidden.retain(|k| k != id.key());
-                u.added.retain(|k| k != id.key());
-                let list = if matches!(c, UsageCmd::Show(_)) { &mut u.added } else { &mut u.hidden };
-                list.push(id.key().into());
-                let before = self.saved_settings.clone();
-                self.settings_changed(&before);
-                self.save_settings();
-            }
-            c => {
-                if let Some(s) = self.services.as_ref() {
-                    s.usage_cmd(c);
-                }
-            }
-        }
-    }
-
-    /// What the AI tab's worker found goes into `st.usage`. Its heads-up
-    /// notices wait their turn for the island (`tick` puts them up one at a
-    /// time once it is free); the frame `on_event` asks for looks at once.
-    fn on_usage(&mut self, ev: services::usage::UsageEvent) {
-        match ev {
-            services::usage::UsageEvent::Alerts(alerts) => self.st.hold_usage_alerts(alerts),
-            ev => self.st.usage.apply(ev),
-        }
-    }
-
-    // ------------------------------------------------------------ Oyenza
-
-    /// How the Oyenza worker should pace itself: in use (unlocked, display
-    /// on) and the power source.
-    fn oyenza_activity(&self) -> services::oyenza::Activity {
-        let p = self.st.power;
-        services::oyenza::Activity {
-            in_use: !self.locked && !self.display_off,
-            on_ac: p.on_ac || !p.has_battery,
-            saver: p.saver,
-            watching: self.oyenza_watch,
-            today: self.today_watch,
-            health: self.st.health_on(),
-        }
-    }
-
-    /// The Oyenza page came on screen or went: the worker keeps its list live only meanwhile.
-    fn set_oyenza_watch(&mut self, on: bool) {
-        if on != self.oyenza_watch {
-            self.oyenza_watch = on;
-            self.tell_oyenza_activity();
-        }
-    }
-
-    /// The Today page came on screen or went: the worker asks for the day only meanwhile.
-    fn set_today_watch(&mut self, on: bool) {
-        if on != self.today_watch {
-            self.today_watch = on;
-            self.tell_oyenza_activity();
-        }
-    }
+    fn set_usage_watch(&mut self) {}
 
     /// The Stocks page asks oyenza.trade for prices only while it is on
     /// screen and someone is at the PC (`pages::stocks::watch`); the worker
@@ -2104,154 +1869,7 @@ impl App {
         }
     }
 
-    fn tell_oyenza_activity(&self) {
-        if let Some(s) = self.services.as_ref() {
-            s.oyenza_activity(self.oyenza_activity());
-        }
-    }
-
-    fn oyenza(&self, c: OyenzaCmd) {
-        if let Some(s) = self.services.as_ref() {
-            s.oyenza(c);
-        }
-    }
-
-    fn on_oyenza(&mut self, ev: OyenzaEvent) {
-        let now = self.st.now;
-        let link_before = self.st.oyenza.link.clone();
-        let pro_before = self.st.studio_pro() == Some(true);
-        match ev {
-            OyenzaEvent::Restored { account } => {
-                self.st.oyenza.link = OyenzaLink::Connected { account };
-                self.ask_pro();
-            }
-            OyenzaEvent::Connecting { code, url, expires_in_s } => {
-                self.st.oyenza.link = OyenzaLink::Connecting { code, url, until: now + expires_in_s as f64 };
-                // Keep the code on screen while the person goes to oyenza.app.
-                if self.st.oyenza.pinned_before.is_none() {
-                    self.st.oyenza.pinned_before = Some(self.st.pinned);
-                }
-                self.st.pinned = true;
-                self.st.page = PageKind::Oyenza;
-                self.expand();
-            }
-            OyenzaEvent::Connected { account } => {
-                self.end_sign_in();
-                self.st.notify(Icon::Check, palette::GREEN, "Connected to Oyenza", format!("as {account}"), 6.0, Some(NoticeAction::OpenPage(PageKind::Oyenza)));
-                self.st.oyenza.link = OyenzaLink::Connected { account };
-                self.ask_pro();
-                // Signed in from the Today page: back to it, where the day comes in.
-                if std::mem::take(&mut self.st.oyenza.from_today) {
-                    self.st.page = PageKind::Today;
-                    self.expand();
-                }
-            }
-            OyenzaEvent::ConnectFailed(code) => {
-                self.st.oyenza.from_today = false;
-                self.end_sign_in();
-                self.st.oyenza.link = OyenzaLink::Off;
-                let (title, subtitle) = oyenza::connect_failure_text(&code);
-                self.st.notify(Icon::Unlink, palette::ORANGE, title, subtitle, 6.0, None);
-            }
-            OyenzaEvent::ConnectCancelled => {
-                self.st.oyenza.from_today = false;
-                self.end_sign_in();
-                self.st.oyenza.link = OyenzaLink::Off;
-            }
-            OyenzaEvent::Money { arrived } => {
-                let o = &mut self.st.oyenza;
-                o.updated_unix = Some(self.st.unix);
-                let fresh = oyenza::unseen(&mut o.shown, &arrived);
-                if let Some(n) = oyenza::money_notice(&fresh) {
-                    let (icon, color) = match n.flow {
-                        Some(oyenza::Flow::In) => (Icon::MoneyIn, palette::GREEN),
-                        Some(oyenza::Flow::Out) => (Icon::MoneyOut, palette::BLUE),
-                        _ => (Icon::Wallet, palette::BLUE),
-                    };
-                    self.oyenza_notice(icon, color, n.title, n.shown, Some(n.hidden));
-                }
-            }
-            OyenzaEvent::Activity(a) => {
-                let o = &mut self.st.oyenza;
-                o.seen.note(&a.days, now);
-                o.activity = Some(a);
-                o.updated_unix = Some(self.st.unix);
-            }
-            OyenzaEvent::ActivityChecked => self.st.oyenza.updated_unix = Some(self.st.unix),
-            OyenzaEvent::Bills { today, bills } => {
-                let day = if today.is_empty() { self.st.day_key() } else { today };
-                self.st.oyenza.bills = bills;
-                self.st.oyenza.bills_today = day.clone();
-                self.st.oyenza.updated_unix = Some(self.st.unix);
-                self.remind_bills(&day);
-            }
-            OyenzaEvent::Day(day) => {
-                let o = &mut self.st.oyenza;
-                o.agenda = Some(day);
-                o.agenda_unix = Some(self.st.unix);
-                o.agenda_state = crate::state::AgendaState::Ready;
-            }
-            OyenzaEvent::DayUnavailable => {
-                self.st.oyenza.agenda = None;
-                self.st.oyenza.agenda_state = crate::state::AgendaState::Unavailable;
-            }
-            OyenzaEvent::DayFailed => self.st.oyenza.agenda_state = crate::state::AgendaState::Failed,
-            OyenzaEvent::Pro(pro) => self.st.oyenza.pro = Some(pro),
-            // Steps asked for before Health was switched off stay out.
-            OyenzaEvent::Health(next) if self.st.health_on() => {
-                if let Some(steps) = self.st.take_health(next) {
-                    self.steps_notice(steps);
-                }
-            }
-            OyenzaEvent::Health(_) => {}
-            OyenzaEvent::NoteSaved(saved) => {
-                let o = &mut self.st.oyenza;
-                o.saving = false;
-                o.input.clear();
-                o.error = None;
-                o.saved = Some((saved, now + oyenza::UNDO_S));
-            }
-            OyenzaEvent::NoteFailed { text, code } => {
-                let o = &mut self.st.oyenza;
-                o.saving = false;
-                if o.input.trim().is_empty() {
-                    o.input = text;
-                }
-                o.error = Some(oyenza::note_error_text(&code).into());
-            }
-            OyenzaEvent::Undone => self.st.oyenza.flash = Some(("Taken back".into(), now + 3.0)),
-            OyenzaEvent::UndoFailed(code) => {
-                let line = if code == "too_late" { "Too late to undo here. Change it in oyenza.app" } else { "Couldn't undo. Change it in oyenza.app" };
-                self.st.oyenza.flash = Some((line.into(), now + 5.0));
-            }
-            OyenzaEvent::Disconnected { by_server } => {
-                self.end_sign_in();
-                self.st.oyenza = crate::state::OyenzaState::default();
-                self.st.health = None;
-                // Signed out: an IELTS session ends, and the ladder was the account's.
-                self.ielts_off();
-                let (title, subtitle) =
-                    if by_server { ("Oyenza disconnected", "Sign in again in Settings") } else { ("Disconnected from Oyenza", "Sign in again any time in Settings") };
-                self.st.notify(Icon::Unlink, palette::TEXT_DIM, title, subtitle, 6.0, None);
-            }
-        }
-        // Signed in or out, the Oyenza page's height changes: the window fits the tallest page again.
-        if self.st.oyenza.link != link_before {
-            self.layout_surface();
-        }
-        if (self.st.studio_pro() == Some(true)) != pro_before {
-            self.pro_changed();
-        }
-    }
-
-    /// Signed in (at start, or just now) with AI usage or the Downloader on:
-    /// whether the account has Studio Pro, now, so their tabs don't wait for
-    /// the Add-ons page to open (`pages::addons::pro_wanted`).
-    fn ask_pro(&self) {
-        if pages::addons::pro_wanted(&self.st) {
-            self.oyenza(OyenzaCmd::CheckPro);
-        }
-    }
+    fn ask_pro(&self) {}
 
     /// Studio Pro came, or went (the server's word, or signing out): the
     /// Downloader's downloads stop as it goes, and its files come with it
@@ -2267,73 +1885,11 @@ impl App {
         }
     }
 
-    /// The code is gone (signed in, refused, cancelled): the island stops
-    /// staying open for it.
-    fn end_sign_in(&mut self) {
-        if let Some(p) = self.st.oyenza.pinned_before.take() {
-            self.st.pinned = p;
-            if !p {
-                self.maybe_schedule_collapse();
-            }
-        }
-    }
+    fn end_sign_in(&mut self) {}
 
-    /// A money or bill notice. Its sum waits for Show unless the tray's "Show
-    /// amounts on the island" is on (`hidden` None: nothing to hide). While a
-    /// full-screen app hides the island it waits, and shows when the island
-    /// is back if it isn't old by then.
-    fn oyenza_notice(&mut self, icon: Icon, color: Color, title: String, shown: String, hidden: Option<String>) {
-        let now = self.st.now;
-        let hide = hidden.is_some() && !self.st.settings.oyenza_show_amounts;
-        let notice = Notice {
-            icon,
-            color,
-            title,
-            title_dim: String::new(),
-            subtitle: if hide { hidden.unwrap_or_default() } else { shown.clone() },
-            until: now + oyenza::NOTICE_S,
-            action: Some(NoticeAction::OpenPage(PageKind::Oyenza)),
-            inline: hide.then_some(InlineAction::ShowAmount),
-            reveal: hide.then_some(shown),
-        };
-        if self.fullscreen_hidden {
-            self.st.oyenza.held = Some((notice, now));
-        } else {
-            self.st.notice = Some(notice);
-        }
-    }
-
-    /// The step goal notice. While a full-screen app hides the island it waits
-    /// like a money notice (`AppState::show_or_hold`), and shows when the island
-    /// is back if it isn't old by then.
     fn steps_notice(&mut self, steps: u32) {
-        let notice = pages::health::goal_notice(steps, self.st.now + oyenza::NOTICE_S);
+        let notice = pages::health::goal_notice(steps, self.st.now + 5.0);
         self.st.show_or_hold(notice, self.fullscreen_hidden);
-    }
-
-    fn show_held_notice(&mut self, now: f64) {
-        if let Some((mut n, at)) = self.st.oyenza.held.take() {
-            if now - at <= oyenza::HELD_MAX_S {
-                n.until = now + oyenza::NOTICE_S;
-                self.st.notice = Some(n);
-            }
-        }
-    }
-
-    /// One reminder per bill, the day before it (or on the day, if the PC was
-    /// off), from the morning on; the rest come with the next look.
-    fn remind_bills(&mut self, today: &str) {
-        let st = &mut self.st;
-        oyenza::prune_noticed(&mut st.store.oyenza_noticed, today);
-        if st.local.hour < oyenza::BILL_HOUR {
-            return;
-        }
-        let Some(b) = oyenza::bills_to_remind(&st.oyenza.bills, today, &st.store.oyenza_noticed).first().map(|b| (*b).clone()) else { return };
-        st.store.oyenza_noticed.push(oyenza::notice_key(&b));
-        st.save();
-        let (shown, hidden) = oyenza::bill_subtitles(&b);
-        let icon = if b.is_card() { Icon::Card } else { Icon::Calendar };
-        self.oyenza_notice(icon, palette::ORANGE, oyenza::bill_title(&b, today), shown, hidden);
     }
 
     /// Look up the current track's lyrics again (the sources changed).
@@ -2414,25 +1970,6 @@ impl App {
                 self.stop_notify();
             }
         }
-        // IELTS off: a session ends, the microphone and voice stop, the files go.
-        let ielts_id = poni_core::addons::IELTS.id;
-        if before.addon_on(ielts_id) && !self.st.settings.addon_on(ielts_id) {
-            self.ielts_off();
-        }
-        // Meeting notes off: a recording stops and its audio goes.
-        let notes_id = poni_core::addons::MEETING_NOTES.id;
-        if before.addon_on(notes_id) && !self.st.settings.addon_on(notes_id) {
-            self.notes_off();
-        }
-        // Health on or off: the Oyenza worker asks for the steps only while
-        // it's on, and off forgets the ones it had.
-        let health_id = poni_core::addons::HEALTH.id;
-        if before.addon_on(health_id) != self.st.settings.addon_on(health_id) {
-            if !self.st.settings.addon_on(health_id) {
-                self.st.health = None;
-            }
-            self.tell_oyenza_activity();
-        }
         if before.game_stats != self.st.settings.game_stats {
             if self.st.settings.game_stats && self.st.game.access == FpsAccess::Unknown {
                 self.check_fps();
@@ -2447,10 +1984,6 @@ impl App {
                 let _ = KillTimer(self.hwnd, TIMER_PEEK);
             }
             self.peek_game(if self.st.settings.game_peek { "peeks picked" } else { "picked to stay" });
-        }
-        // The AI tab's heads-up notices: its worker reads every few minutes only while they're on.
-        if before.usage.notices != self.st.settings.usage.notices {
-            self.set_usage_watch();
         }
         // The display the island hangs on, or its width when open (the
         // Settings window has both).
@@ -2565,20 +2098,6 @@ impl App {
             OpenDataFolder => shell::open(&paths::data_dir().to_string_lossy()),
             About => shell::open(&crate::version::notes_url()),
             LyricsCredit => shell::open("https://lrclib.net"),
-            AppleMusicToken => self.use_apple_music_token(),
-            AppleMusicHelp => shell::open(APPLE_MUSIC_HELP_URL),
-            AppleMusicForget => self.forget_apple_music_token(),
-            OyenzaSignIn => self.oyenza(OyenzaCmd::SignIn),
-            OyenzaCancel => self.oyenza(OyenzaCmd::Cancel),
-            OyenzaDisconnect => self.oyenza(OyenzaCmd::Disconnect),
-            OyenzaOpen => shell::open(oyenza::WEB),
-            // "Update to x…": the island opens on the Update sheet.
-            Update => {
-                self.st.open_update();
-                self.expand();
-            }
-            CheckForUpdates => self.check_for_updates(),
-            ToggleOyenzaAmounts => s.oyenza_show_amounts = !s.oyenza_show_amounts,
             Quit => {
                 self.quit(0);
                 return;
@@ -2598,7 +2117,7 @@ impl App {
         // What the Settings window shows that a service reports.
         let shown = matches!(
             ev,
-            AppEvent::Autostart(_) | AppEvent::Update(_) | AppEvent::Oyenza(_) | AppEvent::Addon { .. } | AppEvent::Usage(_) | AppEvent::Located(_) | AppEvent::Notify(_)
+            AppEvent::Autostart(_) | AppEvent::Addon { .. } | AppEvent::Located(_) | AppEvent::Notify(_)
         );
         if let Some(w) = self.settings_win.as_mut().filter(|_| shown) {
             w.view.dirty = true;
@@ -2798,10 +2317,7 @@ impl App {
                 self.st.game.access = a;
                 self.sync_game();
             }
-            AppEvent::AppleMusic(status) => self.on_apple_music(status),
             AppEvent::Phone(e) => self.on_phone(e),
-            AppEvent::Paired(e) => self.on_paired(e),
-            AppEvent::Oyenza(ev) => self.on_oyenza(ev),
             AppEvent::Autostart(on) => self.st.ui.autostart = Some(on),
             AppEvent::Addon { id, status } => {
                 // A late report from before a switch-off doesn't bring it back.
@@ -2826,55 +2342,10 @@ impl App {
                     }
                 }
             }
-            AppEvent::Update(services::update::UpdateEvent::Checked(r)) => {
-                let open = self.updater.as_mut().is_some_and(|u| u.checked(&mut self.st, r, crate::updates::unix_now()));
-                self.schedule_update();
-                self.fetch_setup();
-                // Check for updates… found one to install: the Update sheet.
-                if open {
-                    self.expand();
-                }
-                // A frame, so a new version's notice goes up now, not with the next redraw.
-                self.request_frame();
-            }
-            AppEvent::Update(services::update::UpdateEvent::Downloaded(r)) => {
-                if self.updater.as_mut().is_some_and(|u| u.fetched(&mut self.st, r)) {
-                    self.expand();
-                }
-                self.request_frame();
-            }
             AppEvent::Located(found) => self.on_located(found),
             AppEvent::Cities { file, got } => pages::prayer::cities_came(&mut self.st, file, got),
             AppEvent::Stocks(ev) => self.st.stocks.apply(ev, self.st.unix),
             AppEvent::Notify(ev) => self.on_notify(ev),
-            AppEvent::Usage(ev) => self.on_usage(ev),
-            AppEvent::AdzanEnded => self.adzan_ended(),
-            AppEvent::Download { id, line } => self.download_line(id, line),
-            AppEvent::DownloadEnded { id, ok } => self.download_ended(id, ok),
-            AppEvent::Ielts(reply) => {
-                let fx = self.st.ielts.reply(*reply, now);
-                self.ielts_do(fx);
-            }
-            // A stopped clip's late report doesn't end the one playing now.
-            AppEvent::VoiceEnded if !self.ielts.voice.playing() => {
-                let failed = self.ielts.voice.failed();
-                self.ielts.voice.stop();
-                // A clip that couldn't play shows its words for their reading time.
-                let fx = if failed { self.st.ielts.voice_failed(now) } else { self.st.ielts.voice_ended(now) };
-                self.ielts_do(fx);
-            }
-            AppEvent::VoiceEnded => {}
-            AppEvent::Notes(reply) => self.notes_reply(*reply),
-            AppEvent::NotesStopped(issue) => {
-                pwarn!("notes: the recording stopped by itself ({issue:?})");
-                self.notes_stop();
-            }
-            AppEvent::MicFailed(why) => {
-                pwarn!("ielts: the microphone failed ({why})");
-                let issue = self.ielts.mic_failed();
-                let fx = self.st.ielts.mic_failed(issue);
-                self.ielts_do(fx);
-            }
             AppEvent::Log(s) => pinfo!("{s}"),
         }
         if let Some(before) = media_before {
@@ -2931,14 +2402,8 @@ impl App {
             } else if self.st.page == PageKind::Record && !self.st.record_on() {
                 self.st.page = pages::first_tab(&self.st);
             }
-            if self.st.page == PageKind::Oyenza {
-                self.oyenza(OyenzaCmd::Refresh);
-            } else if self.st.page == PageKind::Health {
-                self.oyenza(OyenzaCmd::RefreshHealth);
-            } else if self.st.page == PageKind::Notifications {
+            if self.st.page == PageKind::Notifications {
                 self.notify_cmd(NotifyCmd::Check);
-            } else if matches!(self.st.page, PageKind::Notes | PageKind::Ielts | PageKind::Addons | PageKind::Ai) {
-                self.oyenza(OyenzaCmd::CheckPro);
             }
         }
         self.request_frame();
@@ -2970,18 +2435,10 @@ impl App {
             }
             self.set_stats(false);
             self.set_sysmon(false);
-            // Oyen arrives in his tab again at the next opening.
-            self.st.ui.oyen_tab = None;
-            // Sums shown in the Oyenza tab hide again, and it opens on Today next time.
-            self.st.oyenza.reveal = false;
-            self.st.oyenza.day = oyenza::DayPick::Today;
-            self.st.oyenza.scroll = 0.0;
             // Settings closes with the island: it opens again on the page it was opened from.
             if self.st.page == PageKind::Settings {
                 self.st.page = self.st.ui.before_settings.take().filter(|p| pages::tabs(&self.st).contains(p)).unwrap_or_else(|| pages::first_tab(&self.st));
             }
-            self.st.update.sheet = false;
-            self.st.update.said = None;
             // A notice that arrived while expanded gets its full time now.
             let min_until = self.st.now + 4.0;
             if let Some(n) = self.st.notice.as_mut() {
@@ -3153,10 +2610,6 @@ impl App {
             }
             let why = if self.fullscreen_on && !self.st.settings.hide_in_fullscreen && self.st.game.active { " (show over games)" } else { "" };
             pinfo!("fullscreen app {}: island {}{why}", if self.fullscreen_on { "in front" } else { "gone" }, if hide { "hidden" } else { "shown" });
-            // Notices held back wait for the game to leave, not for a peek.
-            if !hide && !self.fullscreen_on {
-                self.show_held_notice(now);
-            }
         }
         if !hide {
             // A borderless game or a browser in F11 may have taken the
@@ -3692,23 +3145,9 @@ impl App {
                 self.st.notice = None;
             }
         }
-        // A new version's notice (or "Updated to") waits for the island to be
-        // free. The first frame counts (the window shows at its end).
-        let free = !self.fullscreen_hidden && !self.locked && !self.display_off && !self.expanded && self.st.notice.is_none();
-        if self.updater.as_mut().is_some_and(|u| u.announce(&mut self.st, free)) {
-            self.request_frame();
-        }
-        // The AI tab's heads-up notices wait the same way, one at a time.
-        // Over a game whose readout only peeks they wait for the game to
-        // leave, as held money notices do, not for a peek.
-        let peeks = self.st.game.active && self.st.settings.game_peek;
-        if self.st.show_usage_notice(free && !peeks, self.expanded && self.st.page == PageKind::Ai) {
-            self.request_frame();
-        }
         if let Some(ended) = self.st.pomodoro.tick(now) {
             pages::focus::on_phase_ended(&mut self.st, ended);
         }
-        self.prayer_tick();
         // Caffeine's reminder before last call waits for the island the same
         // way, behind a prayer's notice, which doesn't wait. The self-test's
         // clock jumps between pictures: it shows none.
@@ -3716,21 +3155,11 @@ impl App {
         if !self.in_selftest && self.last_call.tick(&mut self.st, here) {
             self.request_frame();
         }
-        self.ielts_tick();
-        self.notes_tick();
         self.script_tick();
-        // Prayer times, System, Health, Stocks, AI usage, IELTS or Downloader switched off: its tab is gone.
         let gone = match self.st.page {
-            PageKind::Prayer => !self.st.prayer_on(),
             PageKind::System => !self.st.system_on(),
-            PageKind::Health => !self.st.health_on(),
-            PageKind::Stocks => !self.st.stocks_on(),
             PageKind::Caffeine => !self.st.caffeine_on(),
-            PageKind::Downloads => !self.st.downloader_on(),
             PageKind::Notifications => !self.st.notifications_on(),
-            PageKind::Ielts => !self.st.ielts_on(),
-            PageKind::Notes => !self.st.notes_on(),
-            PageKind::Ai => !self.st.ai_usage_on(),
             _ => false,
         };
         if gone {
@@ -3835,10 +3264,7 @@ impl App {
         // Today's tiles need the readings only while they show (signed out it has the sign-in card, signed in the day).
         self.set_stats(self.mode == Mode::Expanded(PageKind::Today) && pages::today::shows_tiles(&self.st));
         self.set_sysmon(self.mode == Mode::Expanded(PageKind::System));
-        self.set_oyenza_watch(self.mode == Mode::Expanded(PageKind::Oyenza));
-        self.set_today_watch(self.mode == Mode::Expanded(PageKind::Today));
         self.set_stocks_watch();
-        self.set_usage_watch();
         // The Pill theme floats the island below the top edge.
         self.island.set_floating(pill::on(self.st.settings.theme).then_some(pill::TOP_GAP));
         self.island.step(dt, now);
@@ -4319,92 +3745,6 @@ impl App {
         }
     }
 
-    // ------------------------------------------------------------ new versions
-
-    /// Arm the update file's timer for the next read, or stop it while a
-    /// read runs.
-    fn schedule_update(&mut self) {
-        let secs = self.updater.as_ref().and_then(|u| u.due_in(crate::updates::unix_now()));
-        unsafe {
-            match secs {
-                // SetTimer waits at most about 24 days; reads are an hour apart.
-                Some(s) => {
-                    SetTimer(self.hwnd, TIMER_UPDATE, s.saturating_mul(1000).clamp(1000, 0x7FFF_FFFF) as u32, None);
-                }
-                None => {
-                    let _ = KillTimer(self.hwnd, TIMER_UPDATE);
-                }
-            }
-        }
-    }
-
-    /// The timer fired, or someone came back to the PC: read the update file
-    /// if a read is due and someone is here, not on battery saver. Otherwise
-    /// it waits; the lock, display and power events call this again.
-    fn update_due(&mut self) {
-        let now = crate::updates::unix_now();
-        let away = self.locked || self.display_off || self.st.power.saver;
-        match self.updater.as_ref().and_then(|u| u.due_in(now)) {
-            Some(0) if away => {}
-            Some(0) => self.read_update_file(now),
-            _ => self.schedule_update(),
-        }
-    }
-
-    /// Check for updates… (the menu): read the update file now, even on
-    /// battery saver (someone asked); the answer goes on the island.
-    fn check_for_updates(&mut self) {
-        let now = crate::updates::unix_now();
-        if self.updater.as_mut().is_some_and(|u| u.ask(now)) {
-            self.read_update_file(now);
-        }
-        self.request_frame();
-    }
-
-    /// Read the update file on the add-on thread; the answer comes back as
-    /// `UpdateEvent::Checked`.
-    fn read_update_file(&mut self, now: u64) {
-        let job = services::update::check_job(self.sink.clone());
-        let started = self.services.as_ref().is_some_and(|s| s.run_job(job));
-        if let Some(u) = self.updater.as_mut() {
-            u.begin();
-            if !started {
-                u.checked(&mut self.st, Err("the add-on thread isn't running".into()), now);
-                self.schedule_update();
-            }
-        }
-    }
-
-    /// The offered version's Setup, once per release, on the add-on thread
-    /// (after a look at the file, and at start for one already offered).
-    fn fetch_setup(&mut self) {
-        let Some((d, path)) = self.updater.as_mut().and_then(|u| u.want_setup(&mut self.st)) else { return };
-        let job = services::update::download_job(self.sink.clone(), d, path);
-        if !self.services.as_ref().is_some_and(|s| s.run_job(job)) && self.updater.as_mut().is_some_and(|u| u.fetched(&mut self.st, Err("the add-on thread isn't running".into()))) {
-            self.expand();
-        }
-    }
-
-    /// Install now (the Update sheet): run the downloaded Setup, which
-    /// closes this copy and opens the new version, and quit (saving, as on
-    /// any quit). Without one it opens the release's page.
-    fn update_now(&mut self) {
-        if let Some((setup, d)) = self.updater.as_ref().and_then(|u| u.ready_setup(&self.st)) {
-            match services::update::install(&setup, &d) {
-                Ok(()) => {
-                    pinfo!("updates: installing {}", d.file_name());
-                    self.quit(0);
-                    return;
-                }
-                Err(e) => pwarn!("updates: couldn't run the Setup ({e}); opening the release page"),
-            }
-        }
-        if let Some(url) = self.updater.as_ref().and_then(|u| u.download_page(&self.st)) {
-            pinfo!("updates: opening {url}");
-            shell::open(&url);
-        }
-    }
-
     /// Run a notice's inline action in place (the island stays collapsed),
     /// then show a check mark in the pill briefly before the notice leaves.
     fn run_inline_action(&mut self, a: InlineAction) {
@@ -4425,35 +3765,16 @@ impl App {
             if let Some(n) = self.st.notice.as_mut() {
                 n.until = self.st.now;
             }
-            // A new version's: it doesn't come back.
-            if let Some(u) = self.updater.as_mut() {
-                u.seen(&mut self.st);
-            }
             return;
-        }
-        if a == InlineAction::WhatsNew && self.st.notice.as_ref().is_some_and(|n| n.icon != Icon::Check) {
-            shell::open(&crate::version::notes_url());
         }
         let st = &mut self.st;
         // Already done: the check mark is showing.
         if st.notice.as_ref().is_none_or(|n| n.icon == Icon::Check) {
             return;
         }
-        if a == InlineAction::ShowAmount {
-            // The sum and sender take the subtitle's place for a few seconds; the
-            // pill turns into a check (activities.rs inline_done).
-            let until = st.now + oyenza::SHOWN_S;
-            if let Some(n) = st.notice.as_mut() {
-                if let Some(text) = n.reveal.take() {
-                    n.subtitle = text;
-                    n.until = n.until.max(until);
-                }
-            }
-            return;
-        }
         match a {
             InlineAction::StartFocus => st.pomodoro.start(st.now),
-            InlineAction::ShowAmount | InlineAction::StopAdzan | InlineAction::Hide | InlineAction::WhatsNew | InlineAction::Open => {}
+            InlineAction::StopAdzan | InlineAction::Hide | InlineAction::Open => {}
         }
         let until = st.now + INLINE_DONE_S;
         if let Some(n) = st.notice.as_mut() {
@@ -4522,416 +3843,6 @@ impl App {
         (((local - self.st.unix) as f64 / 900.0).round() * 15.0) as i32
     }
 
-    /// Ask Windows where the PC is (the answer: `AppEvent::Located`).
-    fn locate(&mut self) {
-        if self.st.prayer.locate == Locate::Asking || self.selftest.is_some() {
-            return;
-        }
-        self.st.prayer.locate = Locate::Asking;
-        self.st.prayer.located_at = Some(self.st.unix);
-        services::location::locate(self.sink.clone());
-    }
-
-    /// The nearest listed place becomes the place, while following the
-    /// location (`pages::prayer::located`). The point is never saved.
-    fn on_located(&mut self, found: services::location::Located) {
-        use services::location::Located;
-        match found {
-            Located::Denied => self.st.prayer.locate = Locate::Denied,
-            Located::Unknown => self.st.prayer.locate = Locate::Unknown,
-            // Kemenag's places, or the world's cities around it (looked up online).
-            Located::At(lat, lng) => pages::prayer::located(&mut self.st, lat, lng),
-        }
-    }
-
-    /// Each frame (and each minute): the prayer times that just came, and
-    /// asking where the PC is again every 3 hours while following it.
-    fn prayer_tick(&mut self) {
-        if !self.st.prayer_on() {
-            return;
-        }
-        if self.st.settings.prayer.follow_location && self.st.prayer.located_at.is_none_or(|t| self.st.unix - t >= 3 * 3600) {
-            self.locate();
-        }
-        let Some(site) = self.st.prayer_site() else { return };
-        let now = self.st.prayer_now();
-        let Some(from) = self.st.prayer.handled_until else {
-            self.st.prayer.handled_until = Some(now);
-            return;
-        };
-        if now <= from {
-            return;
-        }
-        self.st.prayer.handled_until = Some(now);
-        for m in poni_core::prayer::prayers_between(&site, from, now) {
-            match poni_core::prayer::due(m.at, now) {
-                Due::Ring => self.prayer_moment(m, true),
-                Due::Quiet => self.prayer_moment(m, false),
-                Due::Skip => {}
-            }
-        }
-    }
-
-    /// A prayer's time came: the island says so and plays the chosen sound.
-    /// Quiet when it's late (after a sleep) or a full-screen app hides the island.
-    fn prayer_moment(&mut self, m: PrayerMoment, ring: bool) {
-        let Some(site) = self.st.prayer_site() else { return };
-        let place = self.st.prayer.place.as_ref().map_or(String::new(), |p| p.label.clone());
-        let quiet = !ring || self.fullscreen_hidden;
-        let sound = if quiet { PrayerSound::Silent } else { self.st.settings.prayer.sound };
-        let mut adzan = false;
-        match sound {
-            // The recording isn't Subuh's adzan (no "ash-shalatu khairum minan naum"): Subuh gets the tone.
-            PrayerSound::Adzan if m.prayer != Prayer::Subuh => {
-                adzan = self.play_adzan();
-                if !adzan {
-                    self.st.cmd(Command::Play(crate::commands::Sound::Chime));
-                }
-            }
-            PrayerSound::Adzan | PrayerSound::Tone => self.st.cmd(Command::Play(crate::commands::Sound::Chime)),
-            PrayerSound::Silent => {}
-        }
-        let title = pages::prayer::moment_title(m.prayer);
-        let subtitle = format!("{} \u{b7} {place}", site.hhmm(m.at));
-        let secs = if adzan { 200.0 } else { 60.0 };
-        self.st.notify(Icon::Moon, self.st.accent, title, subtitle, secs, Some(NoticeAction::OpenPage(PageKind::Prayer)));
-        if adzan {
-            self.st.set_notice_inline(InlineAction::StopAdzan);
-        }
-        pinfo!("prayer: {} at {}{}", m.prayer.name(), site.hhmm(m.at), if quiet { ", quietly" } else { "" });
-    }
-
-    /// Start the adzan; music that plays pauses (and stays paused).
-    fn play_adzan(&mut self) -> bool {
-        let a = &poni_core::addons::PRAYER_TIMES;
-        let path = paths::addons_dir().join(a.id).join(a.tag).join("adzan.m4a");
-        match self.adzan.play(&path, &self.sink) {
-            Ok(()) => {
-                self.st.prayer.adzan = true;
-                if self.st.settings.prayer.pause_music && self.st.media.as_ref().is_some_and(|m| m.is_playing()) {
-                    self.st.media_cmd(MediaCmd::PlayPause);
-                }
-                true
-            }
-            Err(e) => {
-                pwarn!("prayer: the adzan didn't play ({e}); the tone instead");
-                false
-            }
-        }
-    }
-
-    /// OK on the countdown before a prayer: the closed island goes back to
-    /// what it would show (the song and its sung line) until the prayer's
-    /// time. Its moment still comes then: `prayer_tick` doesn't look at the
-    /// countdown.
-    fn prayer_countdown_ok(&mut self) {
-        self.refresh_time();
-        if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer_site()) {
-            pinfo!("prayer: countdown put away until {} at {}", m.prayer.name(), site.hhmm(m.at));
-        }
-    }
-
-    // ------------------------------------------------------------ IELTS
-
-    /// The IELTS page's coach, each frame: told when the page comes and goes
-    /// (a tab switch, the island closing, the PC locked or the display off,
-    /// a full-screen app), ticked for its clock, fed the microphone's level.
-    /// The worker goes once the page is closed and nothing is in flight.
-    fn ielts_tick(&mut self) {
-        if !self.ielts_live() {
-            return;
-        }
-        let now = self.st.now;
-        let signed_in = matches!(self.st.oyenza.link, OyenzaLink::Connected { .. });
-        let shown = self.expanded && self.st.page == PageKind::Ielts && self.st.ielts_on() && signed_in && !self.locked && !self.display_off && !self.fullscreen_hidden;
-        if shown != self.ielts_shown {
-            self.ielts_shown = shown;
-            let fx = self.st.ielts.show(shown, now);
-            self.ielts_do(fx);
-        }
-        if shown {
-            let fx = self.st.ielts.tick(now);
-            self.ielts_do(fx);
-        }
-        if self.ielts.recording() {
-            self.st.ielts.meter = self.ielts.level();
-        }
-        self.ielts.retry_deletes();
-        if !shown {
-            self.ielts.rest();
-        }
-        let held = self.st.ielts_holds_island();
-        if self.ielts_held && !held {
-            self.maybe_schedule_collapse();
-        }
-        self.ielts_held = held;
-    }
-
-    /// The self-test pictures the IELTS page from made-up states: the coach
-    /// runs only in the app, and in the self-test's own one-turn run.
-    fn ielts_live(&self) -> bool {
-        !self.in_selftest || self.ielts_turn
-    }
-
-    /// A press on the IELTS page.
-    fn ielts_cmd(&mut self, c: crate::commands::IeltsCmd) {
-        use crate::commands::IeltsCmd;
-        let now = self.st.now;
-        let fx = match c {
-            IeltsCmd::Start => self.st.ielts.start(self.st.settings.ielts_spice),
-            IeltsCmd::Mic => self.st.ielts.tap(now),
-            IeltsCmd::Skip => self.st.ielts.skip(),
-            IeltsCmd::Quit => self.st.ielts.quit(now),
-            IeltsCmd::Retry => self.st.ielts.retry(now),
-        };
-        if c == IeltsCmd::Start && self.st.ielts.phase == poni_core::ielts::Phase::Starting {
-            // A new session: whatever an earlier one left behind goes first.
-            self.ielts.voice.stop();
-            services::ielts::clear_files();
-        }
-        self.ielts_do(fx);
-    }
-
-    /// Carry out what the coach asked for, in order; what an effect brings
-    /// back from the coach (a clip that won't play, a recording that
-    /// stopped) runs before the rest.
-    fn ielts_do(&mut self, fx: Vec<poni_core::ielts::Effect>) {
-        use poni_core::ielts::Effect;
-        if !self.ielts_live() {
-            // The self-test's made-up states ask for nothing.
-            return;
-        }
-        let mut todo: std::collections::VecDeque<Effect> = fx.into();
-        while let Some(e) = todo.pop_front() {
-            let now = self.st.now;
-            let more = match e {
-                Effect::Call(c) => {
-                    self.ielts.call(c, &self.sink);
-                    Vec::new()
-                }
-                Effect::Play(path) => match self.ielts.voice.play(&path, &self.sink) {
-                    Ok(()) => Vec::new(),
-                    Err(err) => {
-                        pwarn!("ielts: a clip didn't play ({err})");
-                        self.st.ielts.voice_failed(now)
-                    }
-                },
-                Effect::StopVoice => {
-                    self.ielts.voice.stop();
-                    Vec::new()
-                }
-                Effect::Record => match self.ielts.record(&self.sink) {
-                    Ok(()) => Vec::new(),
-                    Err(issue) => self.st.ielts.mic_failed(issue),
-                },
-                Effect::StopRecord => match self.ielts.stop_record() {
-                    Ok((wav, secs)) => self.st.ielts.recorded(wav, secs, now),
-                    Err(issue) => self.st.ielts.mic_failed(issue),
-                },
-                Effect::DropRecord => {
-                    self.ielts.drop_record();
-                    Vec::new()
-                }
-                Effect::Delete(path) => {
-                    self.ielts.delete(path);
-                    Vec::new()
-                }
-                Effect::PauseMusic => {
-                    // Once a session, like the adzan: music played back by hand stays playing.
-                    if !self.ielts_music && self.st.media.as_ref().is_some_and(|m| m.is_playing()) {
-                        self.st.media_cmd(MediaCmd::PlayPause);
-                        self.ielts_music = true;
-                    }
-                    Vec::new()
-                }
-                Effect::ResumeMusic => {
-                    if std::mem::take(&mut self.ielts_music) && self.st.media.as_ref().is_some_and(|m| !m.is_playing()) {
-                        self.st.media_cmd(MediaCmd::PlayPause);
-                    }
-                    Vec::new()
-                }
-            };
-            for m in more.into_iter().rev() {
-                todo.push_front(m);
-            }
-        }
-    }
-
-    /// The add-on switched off, or signed out: the session ends (the server
-    /// is told), nothing of it keeps running, and its files go.
-    fn ielts_off(&mut self) {
-        use poni_core::ielts::{Call, Effect};
-        let now = self.st.now;
-        // Everything Udahan does but read the ladder again.
-        let fx = self.st.ielts.quit(now).into_iter().filter(|e| *e != Effect::Call(Call::Me)).collect();
-        self.ielts_do(fx);
-        self.ielts.close();
-        self.st.ielts = Default::default();
-        self.ielts_shown = false;
-    }
-
-    // ------------------------------------------------------------ Meeting notes
-
-    /// Each frame while a meeting is recorded: how loud each source is, for
-    /// Oyen's head and the page's bars.
-    fn notes_tick(&mut self) {
-        if let Some(r) = &self.notes_rec {
-            (self.st.notes.mic, self.st.notes.pc) = r.levels();
-        }
-    }
-
-    /// A press on the Notes page.
-    fn notes_cmd(&mut self, c: crate::commands::NotesCmd) {
-        use crate::commands::NotesCmd;
-        let now = self.st.now;
-        match c {
-            NotesCmd::Start => self.notes_start(),
-            NotesCmd::Stop => self.notes_stop(),
-            NotesCmd::Retry => self.notes_send(),
-            NotesCmd::Discard => {
-                self.notes_take = None;
-                self.st.ui.notes_kept = false;
-                services::notes::clear_audio(None);
-                self.st.notes.reset();
-                pinfo!("notes: the kept recording was thrown away");
-            }
-            NotesCmd::Done => self.st.notes.reset(),
-            NotesCmd::Open => {
-                if let Some(last) = &self.st.notes.last {
-                    crate::shell::open(&last.file);
-                }
-            }
-            NotesCmd::Folder => {
-                let dir = crate::paths::notes_dir();
-                let _ = std::fs::create_dir_all(&dir);
-                crate::shell::open(&dir.to_string_lossy());
-            }
-            NotesCmd::Copy => {
-                if let Some(last) = &self.st.notes.last {
-                    let md = poni_core::notes::markdown(&last.notes, &last.started, false);
-                    services::clipboard::set_text(self.hwnd, &md);
-                    self.st.ui.notes_note = Some(("Copied".into(), now + 2.0));
-                }
-            }
-        }
-    }
-
-    /// Take notes: the microphone and the PC's sound start recording.
-    fn notes_start(&mut self) {
-        // Studio Pro only: the page shows its Pro card instead of the button.
-        if self.notes_rec.is_some() || self.st.notes.live() || self.notes_take.is_some() || self.st.studio_pro() == Some(false) {
-            return;
-        }
-        // Whatever an earlier meeting left (the app closed on it) goes first.
-        services::notes::clear_audio(None);
-        let now = self.st.now;
-        let started = self.st.local;
-        match services::notes::Recording::start(&crate::paths::notes_audio_dir(), &started, &self.sink) {
-            Ok((rec, mic, pc)) => {
-                pinfo!("notes: listening (microphone {}, the PC's sound {})", if mic { "on" } else { "off" }, if pc { "on" } else { "off" });
-                self.notes_started = started;
-                self.st.notes.started(now, mic, pc);
-                self.notes_rec = Some(rec);
-            }
-            Err(issue) => {
-                pwarn!("notes: no recording ({issue:?})");
-                self.st.ui.notes_kept = false;
-                self.st.notes.failed(poni_core::notes::Problem::Capture(issue));
-            }
-        }
-    }
-
-    /// Stop: the meeting is over, its notes get written.
-    fn notes_stop(&mut self) {
-        use poni_core::notes::{CaptureIssue, Problem};
-        let Some(rec) = self.notes_rec.take() else { return };
-        match rec.stop() {
-            Ok(take) if take.secs >= 1.0 && !take.parts.is_empty() => {
-                self.notes_take = Some(take);
-                self.st.ui.notes_kept = true;
-                self.notes_send();
-            }
-            Ok(take) => {
-                let _ = std::fs::remove_dir_all(&take.dir);
-                self.st.ui.notes_kept = false;
-                self.st.notes.failed(Problem::NothingHeard);
-            }
-            Err(issue) => {
-                self.st.ui.notes_kept = false;
-                self.st.notes.failed(Problem::Capture(if issue == CaptureIssue::MicDenied { issue } else { CaptureIssue::Failed }));
-            }
-        }
-    }
-
-    /// Hand the kept meeting over (again, for Try again).
-    fn notes_send(&mut self) {
-        let Some(take) = self.notes_take.clone() else { return };
-        self.st.notes.stopped(take.parts.len() as u32, take.secs);
-        let job = services::notes::Job { take, started: self.notes_started, lang: poni_core::notes::Lang::Auto, api: self.notes_api.clone(), out: crate::paths::notes_dir() };
-        services::notes::send(job, &self.sink);
-    }
-
-    /// The meeting on its way: how far, the notes saved, or what went wrong.
-    /// With the island closed, the end of it shows as a notice.
-    fn notes_reply(&mut self, r: poni_core::notes::Reply) {
-        use poni_core::notes::Reply;
-        if !self.st.notes_on() {
-            return;
-        }
-        let now = self.st.now;
-        let end = match &r {
-            Reply::Saved(s) => Some(("Your notes are ready".to_string(), s.notes.title.clone(), true)),
-            Reply::Failed(p) => Some((p.title().to_string(), "Open Notes to try again".to_string(), false)),
-            _ => None,
-        };
-        let saved = matches!(r, Reply::Saved(_));
-        self.st.notes.reply(r, now);
-        if saved {
-            self.notes_take = None;
-            self.st.ui.notes_kept = false;
-            self.st.ui.notes_saved_at = now;
-        }
-        if let Some((title, subtitle, good)) = end {
-            if !(self.expanded && self.st.page == PageKind::Notes) {
-                let color = if good { crate::oyen::ORANGE } else { palette::TEXT_DIM };
-                self.st.notify(Icon::Notes, color, title, subtitle, 8.0, Some(crate::state::NoticeAction::OpenPage(PageKind::Notes)));
-            }
-        }
-    }
-
-    /// A meeting the app closed on before its notes were saved: its
-    /// recording waits on the page for Write it up or Throw away.
-    fn notes_restore(&mut self) {
-        if let Some((take, started)) = services::notes::kept() {
-            pinfo!("notes: a meeting of {:.0} s from before wasn't written up; it's kept", take.secs);
-            self.notes_started = started;
-            self.st.notes.secs = take.secs;
-            self.notes_take = Some(take);
-            self.st.ui.notes_kept = true;
-            self.st.notes.failed(poni_core::notes::Problem::Unfinished);
-        }
-    }
-
-    /// The add-on switched off: a recording stops, its audio goes, and the
-    /// page forgets the meeting.
-    fn notes_off(&mut self) {
-        drop(self.notes_rec.take());
-        self.notes_take = None;
-        services::notes::clear_audio(None);
-        self.st.notes = Default::default();
-        self.st.ui.notes_kept = false;
-    }
-
-    fn adzan_ended(&mut self) {
-        self.adzan.stop();
-        self.st.prayer.adzan = false;
-        // The notice leaves soon after the adzan.
-        let soon = self.st.now + 4.0;
-        if let Some(n) = self.st.notice.as_mut().filter(|n| n.inline == Some(InlineAction::StopAdzan)) {
-            n.until = n.until.min(soon);
-        }
-    }
-
     fn set_page(&mut self, p: PageKind) {
         if p != PageKind::Shelf && self.phone.is_some() {
             self.close_phone();
@@ -4955,14 +3866,8 @@ impl App {
             if self.text_focus {
                 self.blur_text();
             }
-            if p == PageKind::Oyenza {
-                self.oyenza(OyenzaCmd::Refresh);
-            } else if p == PageKind::Health {
-                self.oyenza(OyenzaCmd::RefreshHealth);
-            } else if p == PageKind::Notifications {
+            if p == PageKind::Notifications {
                 self.notify_cmd(NotifyCmd::Check);
-            } else if matches!(p, PageKind::Notes | PageKind::Ielts | PageKind::Addons | PageKind::Ai) {
-                self.oyenza(OyenzaCmd::CheckPro);
             }
         }
     }
@@ -5061,36 +3966,16 @@ impl App {
                 Command::Collapse => self.collapse(),
                 Command::Play(s) => services::sound::play(s),
                 Command::OpenUrl(u) => shell::open(&u),
-                Command::Update => self.update_now(),
-                Command::CheckForUpdates => self.check_for_updates(),
-                Command::InstallOnNextStart => {
-                    if let Some(u) = self.updater.as_mut() {
-                        u.install_on_next_start(&mut self.st);
-                    }
-                }
                 Command::WantStats(b) => self.set_stats(b),
                 Command::SetAutostart(on) => {
                     self.st.ui.autostart = Some(on);
                     crate::autostart::report(self.sink.clone(), Some(on));
                 }
                 Command::Phone(c) => self.phone_cmd(c),
-                Command::Pair(c) => self.pair_cmd(c),
-                Command::Oyenza(c) => self.oyenza(c),
-                Command::Usage(c) => self.usage_cmd(c),
-                Command::Ielts(c) => self.ielts_cmd(c),
-                Command::Notes(c) => self.notes_cmd(c),
-                // The self-test's pictures use the files it seeds (none from the website).
-                Command::GetCities(file) => {
-                    if self.selftest.is_none() {
-                        services::cities::fetch(file, self.sink.clone());
-                    }
-                }
-                Command::Download(c) => self.download_cmd(c),
                 Command::Notify(c) => self.notify_cmd(c),
             }
         }
         self.sync_phone_offer();
-        self.sync_pair_offer();
     }
 
     // ------------------------------------------------------------ notifications
@@ -5319,144 +4204,6 @@ impl App {
         }
     }
 
-    // ------------------------------------------------------------ paired phones
-
-    fn pair_cmd(&mut self, c: PairCmd) {
-        let now = self.st.now;
-        match c {
-            PairCmd::Begin => {
-                let r = match &self.services {
-                    Some(s) => s.pair_begin(),
-                    None => Err("Pairing is off in the self-test.".into()),
-                };
-                let Some(pd) = self.st.phone.as_mut() else { return };
-                pd.outcome = None;
-                match r {
-                    Ok(url) => {
-                        pinfo!("pair drop: showing a pairing code");
-                        pd.view = PhoneView::Pairing { qr: QrMatrix::encode(&url), url, until: now + poni_core::pairdrop::meet::PAIRING_FOR.as_secs_f64() };
-                    }
-                    Err(e) => {
-                        pwarn!("pair drop: {e}");
-                        pd.outcome = Some((e, false, now + pages::shelf::PHONE_OUTCOME_S));
-                    }
-                }
-            }
-            PairCmd::Back => {
-                if matches!(self.st.phone.as_ref().map(|p| &p.view), Some(PhoneView::Pairing { .. })) {
-                    if let Some(s) = &self.services {
-                        s.pair_cancel();
-                    }
-                }
-                if let Some(pd) = self.st.phone.as_mut() {
-                    pd.view = PhoneView::Lan;
-                }
-            }
-            PairCmd::List => {
-                if matches!(self.st.phone.as_ref().map(|p| &p.view), Some(PhoneView::Pairing { .. })) {
-                    if let Some(s) = &self.services {
-                        s.pair_cancel();
-                    }
-                }
-                if let Some(pd) = self.st.phone.as_mut() {
-                    pd.view = PhoneView::Paired;
-                }
-            }
-            PairCmd::Remove(room) => {
-                if let Some(s) = &self.services {
-                    s.pair_remove(&room);
-                }
-                if let Some(i) = self.st.paired.iter().position(|p| p.room == room) {
-                    let p = self.st.paired.remove(i);
-                    pinfo!("pair drop: removed a paired phone");
-                    if let Some(pd) = self.st.phone.as_mut() {
-                        pd.outcome = Some((format!("{} can't send to this PC any more", p.name), false, now + pages::shelf::PHONE_OUTCOME_S));
-                        pd.outcome_line = Some("Pair it again any time from Pair a phone.".into());
-                    }
-                }
-            }
-        }
-        self.request_frame();
-    }
-
-    /// Keep the files paired phones may save in step with the Shelf.
-    fn sync_pair_offer(&mut self) {
-        let Some(svc) = &self.services else { return };
-        let paths = self.st.store.shelf.paths();
-        if self.pair_offer.as_ref() != Some(&paths) {
-            svc.pair_shelf(paths.iter().map(PathBuf::from).collect());
-            self.pair_offer = Some(paths);
-        }
-    }
-
-    fn on_paired(&mut self, e: MeetEvent) {
-        let now = self.st.now;
-        let until = now + pages::shelf::PHONE_OUTCOME_S;
-        match e {
-            MeetEvent::Pairs(list) => self.st.paired = paired_phones(list),
-            MeetEvent::Server { reachable } => {
-                if self.st.pair_server.is_some() || !reachable {
-                    pinfo!("pair drop: meeting server {}", if reachable { "reachable again" } else { "unreachable" });
-                }
-                self.st.pair_server = Some(reachable);
-            }
-            MeetEvent::Paired { name, .. } => {
-                pinfo!("pair drop: a phone finished pairing");
-                if let Some(pd) = self.st.phone.as_mut() {
-                    pd.view = PhoneView::Lan;
-                    pd.outcome = Some((format!("{name} is paired"), true, until));
-                    pd.outcome_line = Some("It can now send from any network, even with this panel closed.".into());
-                }
-                if !self.hovering {
-                    // The island closes now that nothing waits: say it on the pill.
-                    self.st.notify(Icon::Phone, palette::GREEN, format!("{name} is paired"), "It can send from any network now", 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
-                }
-                self.st.chime();
-                self.maybe_schedule_collapse();
-            }
-            MeetEvent::Phone { phone, ev, .. } => match ev {
-                PeerEvent::Hello { .. } => pinfo!("pair drop: a paired phone connected"),
-                PeerEvent::Progress { files, done: 0, .. } => {
-                    if !self.expanded {
-                        self.st.notify(Icon::Phone, palette::GREEN, format!("{phone} is sending {}", files_label(files)), "They go straight onto the Shelf", 4.0, None);
-                    }
-                }
-                PeerEvent::Progress { .. } => {}
-                PeerEvent::Received { paths } => {
-                    let n = paths.len();
-                    let title = format!("{} from {phone} {} on the Shelf", files_label(n), if n == 1 { "is" } else { "are" });
-                    let added: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
-                    self.st.store.shelf.add_paths(&added, self.st.unix);
-                    for p in added {
-                        self.st.cmds.push(Command::LoadThumb(p));
-                    }
-                    self.st.save();
-                    pinfo!("pair drop: {} from a paired phone", files_label(n));
-                    if let Some(pd) = self.st.phone.as_mut() {
-                        pd.outcome = Some((title.clone(), true, until));
-                        pd.outcome_line = None;
-                    }
-                    if !self.expanded {
-                        self.st.notify(Icon::Phone, palette::GREEN, title, "Open the Shelf to see them", 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
-                    }
-                    self.st.chime();
-                    self.maybe_schedule_collapse();
-                }
-                PeerEvent::Failed { reason, detail } => {
-                    pwarn!("pair drop: a send from a paired phone failed: {reason} {detail}");
-                    if !self.expanded {
-                        self.st.notify(Icon::Phone, palette::TEXT, format!("Nothing kept from {phone}"), format!("{reason}."), 6.0, None);
-                    } else if let Some(pd) = self.st.phone.as_mut() {
-                        pd.outcome = Some((format!("Nothing kept from {phone}. {reason}."), false, until));
-                        pd.outcome_line = None;
-                    }
-                }
-                PeerEvent::Ended { .. } => {}
-            },
-        }
-        self.request_frame();
-    }
-
     fn save_now(&mut self) {
         if !self.store_writable {
             pwarn!("data.json couldn't be read at start; not overwriting it");
@@ -5518,69 +4265,6 @@ impl App {
 
     /// Self-test, the IELTS turn: calls go to `base` with `key`, the
     /// recording is `stand_in`, and the IELTS page is open, signed in.
-    pub fn selftest_ielts_begin(&mut self, base: String, key: String, stand_in: PathBuf) {
-        // A kit of its own: no worker from before, and calls go to the run's server.
-        self.ielts = Default::default();
-        self.ielts_turn = true;
-        self.ielts.api = Some((base, key));
-        self.ielts.stand_in = Some(stand_in);
-        self.st.ielts = Default::default();
-        self.st.oyenza = Default::default();
-        self.st.oyenza.link = OyenzaLink::Connected { account: "s\u{2022}\u{2022}\u{2022}@example.com".into() };
-        self.st.settings.set_addon(poni_core::addons::IELTS.id, true);
-        self.st.addons.insert(poni_core::addons::IELTS.id, AddonStatus::Ready);
-        self.st.notice = None;
-        self.st.hud = None;
-        self.st.page = PageKind::Ielts;
-        self.ielts_shown = false;
-        self.selftest_set_expanded(true);
-    }
-
-    /// Self-test, the IELTS turn: a press on the page.
-    pub fn selftest_ielts(&mut self, c: crate::commands::IeltsCmd) {
-        self.st.now = clock::mono();
-        self.ielts_cmd(c);
-        self.request_frame();
-    }
-
-    /// Self-test, the IELTS turn: the files its session left (none, once
-    /// every clip and answer was used and deleted).
-    pub fn selftest_ielts_files(&mut self) -> usize {
-        self.ielts.retry_deletes();
-        std::fs::read_dir(paths::ielts_dir()).map(|d| d.count()).unwrap_or(0)
-    }
-
-    /// Self-test, the IELTS turn is over: nothing of it stays.
-    /// The self-test's notes turn: a made-up meeting (`take`) handed over to
-    /// the run's own server with its own key.
-    pub fn selftest_notes_begin(&mut self, base: String, key: String, take: services::notes::Take) {
-        self.notes_api = Some((base, key));
-        self.st.settings.set_addon(poni_core::addons::MEETING_NOTES.id, true);
-        self.st.addons.insert(poni_core::addons::MEETING_NOTES.id, AddonStatus::Ready);
-        self.st.notes = Default::default();
-        self.notes_started = poni_core::datetime::LocalDateTime { year: 2026, month: 10, day: 29, hour: 14, minute: 5, second: 0 };
-        self.notes_take = Some(take);
-        self.st.ui.notes_kept = true;
-        self.notes_send();
-    }
-
-    pub fn selftest_notes_end(&mut self) {
-        self.notes_off();
-        self.notes_api = None;
-        self.st.settings.set_addon(poni_core::addons::MEETING_NOTES.id, false);
-        self.st.addons.insert(poni_core::addons::MEETING_NOTES.id, AddonStatus::Off);
-    }
-
-    pub fn selftest_ielts_end(&mut self) {
-        self.ielts_off();
-        self.ielts_turn = false;
-        self.ielts = Default::default();
-        self.st.settings.set_addon(poni_core::addons::IELTS.id, false);
-        self.st.addons.insert(poni_core::addons::IELTS.id, AddonStatus::Off);
-        self.st.oyenza = Default::default();
-        self.st.page = PageKind::ALL[0];
-    }
-
     /// At rest: outline settled, mode current, no page switch or outgoing fade.
     /// The Settings window is open.
     pub fn settings_window_open(&self) -> bool {
@@ -6225,21 +4909,7 @@ fn motion_name(from: &Mode, to: &Mode) -> &'static str {
     }
 }
 
-/// "1 file", "3 files".
-/// The panel's list: most recently used first.
-fn paired_phones(pairs: Vec<poni_core::pairdrop::Pair>) -> Vec<PairedPhone> {
-    let mut v: Vec<PairedPhone> = pairs.into_iter().map(|p| PairedPhone { room: p.room(), name: p.name, seen: p.seen.max(p.added) }).collect();
-    v.sort_by_key(|a| std::cmp::Reverse(a.seen));
-    v
-}
 
-fn files_label(n: usize) -> String {
-    format!("{n} {}", if n == 1 { "file" } else { "files" })
-}
-
-// The Downloads page's commands and yt-dlp's reports.
-#[path = "app_downloads.rs"]
-mod downloads;
 
 #[cfg(test)]
 mod tests {

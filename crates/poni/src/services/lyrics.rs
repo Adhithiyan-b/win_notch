@@ -32,8 +32,7 @@
 //! every later request, a descriptive User-Agent, and at most a couple of
 //! delayed retries after network errors.
 
-use crate::events::{AppEvent, AppleMusicStatus, EventSink, LyricsResult};
-use crate::services::applemusic::{AppleMusic, Check, Miss};
+use crate::events::{AppEvent, EventSink, LyricsResult};
 use crate::services::http::{self, Client, FetchError, MtaGuard};
 use crate::state::MediaSession;
 use poni_core::lrclib::{self, LrclibRecord, TrackQuery};
@@ -49,7 +48,6 @@ use pure::{duration_secs, is_fresh, lyrics_for, prune_victims, retry_delay, usab
 // LRCLIB asks apps to say who they are.
 const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
 const SOURCE: &str = "LRCLIB";
-const APPLE_SOURCE: &str = "Apple Music";
 /// Minimum gap between two requests to LRCLIB.
 const MIN_GAP: Duration = Duration::from_secs(1);
 /// 429 without a usable `Retry-After`.
@@ -119,13 +117,6 @@ impl LyricsService {
         }
         self.shared.cv.notify_all();
     }
-
-    /// The Apple Music token on disk was saved or removed: the worker reloads
-    /// it, checks it with Apple and reports `AppEvent::AppleMusic`.
-    pub fn apple_token_changed(&self) {
-        self.shared.lock().apple_changed = true;
-        self.shared.cv.notify_all();
-    }
 }
 
 impl Drop for LyricsService {
@@ -152,8 +143,6 @@ struct Job {
 /// What the worker should do next.
 enum Work {
     Lookup(Job),
-    /// Reload and check the Apple Music token.
-    AppleToken,
 }
 
 #[derive(Default)]
@@ -164,8 +153,6 @@ struct Queue {
     retry: Option<(Instant, Job)>,
     /// Track key of the newest request; anything else is stale.
     newest_key: String,
-    /// The Apple Music token was saved or removed (handled before any job).
-    apple_changed: bool,
     shutdown: bool,
 }
 
@@ -213,12 +200,10 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink) {
     let _com = MtaGuard::new();
     let cache_dir = crate::paths::lyrics_cache_dir();
     prune_cache(&cache_dir);
-    let apple = AppleMusic::new();
-    let mut w = Worker { shared, sink, cache_dir, apple, client: None, last_request: None, blocked_until: None, writes: 0 };
+    let mut w = Worker { shared, sink, cache_dir, client: None, last_request: None, blocked_until: None, writes: 0 };
     while let Some(work) = w.next_job() {
         match work {
             Work::Lookup(job) => w.process(job),
-            Work::AppleToken => w.apple_token_changed(),
         }
     }
 }
@@ -227,7 +212,6 @@ struct Worker {
     shared: Arc<Shared>,
     sink: EventSink,
     cache_dir: PathBuf,
-    apple: AppleMusic,
     /// Created on first use; reused so connections are pooled.
     client: Option<Client>,
     /// When the last request to LRCLIB finished.
@@ -239,16 +223,12 @@ struct Worker {
 }
 
 impl Worker {
-    /// Sleep until there is work: a changed Apple Music token first, then a
-    /// queued job or a delayed retry that is due; `None` on shutdown.
+    /// Sleep until there is work: a queued job or a delayed retry that is due; `None` on shutdown.
     fn next_job(&self) -> Option<Work> {
         let mut q = self.shared.lock();
         loop {
             if q.shutdown {
                 return None;
-            }
-            if std::mem::take(&mut q.apple_changed) {
-                return Some(Work::AppleToken);
             }
             if let Some(job) = q.pending.take() {
                 return Some(Work::Lookup(job));
@@ -280,12 +260,6 @@ impl Worker {
 
     fn process(&mut self, job: Job) {
         match self.lookup(&job) {
-            Ok(LyricsResult::Found { lyrics, source, .. }) => {
-                // Readings for Japanese / Korean / Chinese lines, worked out
-                // here so the UI thread never waits on the analyzer.
-                let read = super::romanize::pronounce(&lyrics);
-                self.deliver(&job, LyricsResult::Found { lyrics, source, ruby: read.ruby, wants_ja_readings: read.wants_ja_readings })
-            }
             Ok(result) => self.deliver(&job, result),
             Err(Halt::Abandoned) => {}
             Err(Halt::Failed { msg, retry_at }) => {
@@ -310,23 +284,6 @@ impl Worker {
         // now, so no notify is needed.
     }
 
-    /// The user saved or removed their Apple Music token: reload it and tell
-    /// the UI whether Apple accepts it.
-    fn apple_token_changed(&mut self) {
-        self.apple.reload_token();
-        if !self.apple.has_token() {
-            return;
-        }
-        let shared = self.shared.clone();
-        let live = move || !shared.lock().shutdown;
-        let status = match self.apple.check(&live) {
-            Check::Accepted => AppleMusicStatus::Accepted,
-            Check::Rejected => AppleMusicStatus::Rejected,
-            Check::Unreachable => AppleMusicStatus::Unreachable,
-        };
-        self.sink.send(AppEvent::AppleMusic(status));
-    }
-
     fn lookup(&mut self, job: &Job) -> Result<LyricsResult, Halt> {
         let q = lrclib::normalize_query(&job.query);
         if q.title.trim().is_empty() {
@@ -334,46 +291,6 @@ impl Worker {
             return Ok(LyricsResult::NotFound);
         }
         self.lookup_lrclib(job, &q)
-    }
-
-    /// Apple Music's synced lyrics; `Ok(None)` hands the song to LRCLIB.
-    fn lookup_apple(&mut self, job: &Job, q: &TrackQuery) -> Result<Option<LyricsResult>, Halt> {
-        let key = format!("am-{}", lrclib::cache_key(q));
-        let path = self.cache_dir.join(format!("{key}.json"));
-        let cached = read_cache(&path);
-        if let Some(entry) = &cached {
-            if is_fresh(entry, crate::clock::unix_now()) {
-                return Ok(entry.record.as_ref().map(|r| to_result(Some(r), job, APPLE_SOURCE)));
-            }
-        }
-        let (shared, track_key) = (self.shared.clone(), job.track_key.clone());
-        let live = move || {
-            let q = shared.lock();
-            !q.shutdown && q.newest_key == track_key
-        };
-        match self.apple.find(q, &live) {
-            Ok(Some(record)) => {
-                crate::pinfo!("lyrics {key}: synced");
-                self.store(&path, &CacheEntry::new(Some(record.clone()), crate::clock::unix_now()));
-                Ok(Some(to_result(Some(&record), job, APPLE_SOURCE)))
-            }
-            Ok(None) => {
-                crate::pinfo!("lyrics {key}: no synced lyrics on Apple Music");
-                self.store(&path, &CacheEntry::new(None, crate::clock::unix_now()));
-                Ok(None)
-            }
-            Err(Miss::Abandoned) => Err(Halt::Abandoned),
-            Err(miss) => {
-                match miss {
-                    Miss::Rejected => self.sink.send(AppEvent::AppleMusic(AppleMusicStatus::Rejected)),
-                    Miss::NoAccess => self.sink.send(AppEvent::AppleMusic(AppleMusicStatus::NoAccess)),
-                    Miss::Unreachable(why) => crate::pwarn!("lyrics: Apple Music unavailable ({why}); asking LRCLIB"),
-                    Miss::Abandoned => {}
-                }
-                // An expired hit still beats asking LRCLIB.
-                Ok(cached.as_ref().and_then(|e| e.record.as_ref()).map(|r| to_result(Some(r), job, APPLE_SOURCE)))
-            }
-        }
     }
 
     fn lookup_lrclib(&mut self, job: &Job, q: &TrackQuery) -> Result<LyricsResult, Halt> {
@@ -610,7 +527,7 @@ fn to_result(record: Option<&LrclibRecord>, job: &Job, source: &str) -> LyricsRe
         return LyricsResult::Instrumental;
     }
     match record.and_then(|r| lyrics_for(r, job.query.duration_s)) {
-        Some(lyrics) => LyricsResult::Found { lyrics, source: source.into(), ruby: Vec::new(), wants_ja_readings: false },
+        Some(lyrics) => LyricsResult::Found { lyrics, source: source.into() },
         None => LyricsResult::NotFound,
     }
 }

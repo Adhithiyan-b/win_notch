@@ -30,7 +30,7 @@ use crate::ui::{wid, wid_n, CursorKind, Hit, Input, MouseButton, PillStyle, Ui, 
 use crate::version::VERSION;
 use poni_core::caffeine;
 use poni_core::geom::{palette, Color, Point, Rect};
-use poni_core::settings::{IdleStyle, MonitorChoice, PrayerFollow, PrayerSound, Theme};
+use poni_core::settings::{IdleStyle, MonitorChoice, Theme};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -154,15 +154,12 @@ pub enum Section {
     Tabs,
     Addons,
     Focus,
-    Prayer,
     Caffeine,
-    Ai,
-    Oyenza,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 11] = [
+    pub const ALL: [Section; 10] = [
         Section::General,
         Section::Appearance,
         Section::Island,
@@ -171,7 +168,6 @@ impl Section {
         Section::Tabs,
         Section::Addons,
         Section::Focus,
-        Section::Prayer,
         Section::Caffeine,
         Section::About,
     ];
@@ -186,10 +182,7 @@ impl Section {
             Section::Tabs => "Tabs",
             Section::Addons => "Add-ons",
             Section::Focus => "Focus",
-            Section::Prayer => "Prayer times",
             Section::Caffeine => "Caffeine",
-            Section::Ai => "AI usage",
-            Section::Oyenza => "Oyenza account",
             Section::About => "About",
         }
     }
@@ -205,10 +198,7 @@ impl Section {
             Section::Tabs => "tabs",
             Section::Addons => "addons",
             Section::Focus => "focus",
-            Section::Prayer => "prayer",
             Section::Caffeine => "caffeine",
-            Section::Ai => "ai",
-            Section::Oyenza => "oyenza",
             Section::About => "about",
         }
     }
@@ -223,10 +213,7 @@ impl Section {
             Section::Tabs => Icon::App,
             Section::Addons => Icon::Addons,
             Section::Focus => Icon::Timer,
-            Section::Prayer => Icon::Moon,
             Section::Caffeine => Icon::Coffee,
-            Section::Ai => Icon::Ai,
-            Section::Oyenza => Icon::Oyenza,
             Section::About => Icon::Gear,
         }
     }
@@ -242,21 +229,15 @@ impl Section {
             Section::Tabs => palette::GREEN,
             Section::Addons => Color::hex(0x0A84FF),
             Section::Focus => palette::ORANGE,
-            Section::Prayer => Color::hex(0x30B0A0),
             Section::Caffeine => Color::hex(0xA2845E),
-            Section::Ai => palette::PURPLE,
-            Section::Oyenza => palette::ORANGE,
             Section::About => Color::hex(0x8E8E93),
         }
     }
 
-    /// Prayer times and Caffeine have a section only while their add-ons are
-    /// on, AI usage only with Studio Pro.
+    /// Caffeine has a section only while its add-on is on.
     pub fn shown(self, st: &AppState) -> bool {
         match self {
-            Section::Prayer => st.prayer_on(),
             Section::Caffeine => st.caffeine_on(),
-            Section::Ai => st.ai_usage_on(),
             _ => true,
         }
     }
@@ -301,18 +282,11 @@ pub enum Key {
     LongEvery,
     AutoBreaks,
     AutoFocus,
-    PrayerSound,
-    PrayerCountdown,
-    PrayerPause,
-    PrayerFollow,
-    PrayerCalendar,
     CaffeineBedtime,
     CaffeineHalfLife,
     CaffeineBedLimit,
     CaffeineDayLimit,
     CaffeineRemind,
-    AiNotices,
-    AiNear,
     SettingsFile,
     DataFolder,
     ReleaseNotes,
@@ -357,8 +331,6 @@ pub enum Block {
     Version,
     /// The themes as cards with a small picture of each.
     Themes,
-    /// The Oyenza account row (the island's Settings page has the same).
-    Account,
     /// The Add-ons page itself.
     Addons,
     /// A dim line of text.
@@ -594,14 +566,6 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                 Block::Note("Pick a place by hand on the island's Prayer page."),
             ]
         }
-        Section::Ai => {
-            let u = &s.usage;
-            let mut rows = vec![switch(Key::AiNotices, "Heads-up notices", Some("When a plan's limit gets close, runs out or comes back"), u.notices)];
-            if u.notices {
-                rows.push(item(Key::AiNear, "Close to the limit at", None, Ctl::Stepper(format!("{} %", st.usage_near_pct()))));
-            }
-            vec![Block::Group(None, rows), Block::Note("Services, keys and the Oyenza Inference connect are on the AI tab.")]
-        }
         Section::Caffeine => {
             let c = s.caffeine.sane();
             let remind = format!("On the island, {} minutes before", caffeine::REMIND_BEFORE);
@@ -619,7 +583,6 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                 Block::Note("Add what you drink on the island's Caffeine page."),
             ]
         }
-        Section::Oyenza => vec![Block::Account],
         Section::About => vec![
             Block::Version,
             Block::Group(
@@ -1322,15 +1285,8 @@ fn row_h(it: &Item) -> f32 {
 fn block_h(st: &AppState, b: &Block) -> f32 {
     match b {
         Block::Group(title, items) => title.map_or(0.0, |_| GROUP_TITLE_H) + items.iter().map(row_h).sum::<f32>(),
-        Block::Version => {
-            if st.update.offer.is_some() {
-                112.0
-            } else {
-                72.0
-            }
-        }
+        Block::Version => 72.0,
         Block::Themes => GROUP_TITLE_H + theme_cards_h(),
-        Block::Account => 72.0,
         Block::Addons => crate::pages::addons::height(st),
         Block::Note(_) => 18.0,
     }
@@ -1376,12 +1332,6 @@ fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, vi
         }
         Block::Version => draw_version(ui, st, r, view, sf),
         Block::Themes => draw_themes(ui, st, r, view, sf, m),
-        Block::Account => {
-            fill_group(ui, r, sf.group);
-            if visible(r, view).is_some_and(|v| v.h >= r.h - 0.5) {
-                crate::pages::settings::draw_account(ui, st, r.inset(ROW_PAD, 14.0));
-            }
-        }
         Block::Addons => crate::pages::addons::draw(ui, st, r),
         Block::Note(t) => ui.c.text(t, Rect::new(r.x + 2.0, r.y, r.w, r.h), &TextStyle::footnote().color(palette::TEXT_FAINT)),
     }
@@ -1589,51 +1539,6 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
     let right = check.map_or(head.right(), |b| b.x - 12.0);
     ui.c.text("Dynamic Notch", Rect::new(tx, cy - 20.0, (right - tx).max(0.0), 22.0), &TextStyle::headline());
     ui.c.text(&format!("Version {VERSION}"), Rect::new(tx, cy + 2.0, (right - tx).max(0.0), 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
-    if let Some(b) = check {
-        crate::pages::settings::draw_check(ui, st, b);
-    }
-    let Some(rel) = st.update.offer.clone() else { return };
-    let px = 1.0 / ui.c.scale().max(0.5);
-    let row = Rect::new(head.x, head.bottom(), head.w, r.bottom() - head.bottom());
-    ui.c.fill_rect(Rect::new(row.x, row.y, row.w, px), RULE);
-    let accent = st.accent;
-    // Windows with the Setup in: now or next start; otherwise its page (or the Mac's DMG).
-    let mut buttons: Vec<(&str, Command, PillStyle)> = Vec::new();
-    if st.update.ready {
-        buttons.push(("Install now", Command::Update, PillStyle::Primary(accent)));
-        let later = if st.update.next_start { "Set for next start" } else { "On next start" };
-        buttons.push((later, Command::InstallOnNextStart, PillStyle::Utility));
-    } else {
-        buttons.push(("Download", Command::Update, PillStyle::Primary(accent)));
-    }
-    buttons.push(("What's new", Command::OpenUrl(rel.notes.clone()), PillStyle::Utility));
-    let mut x = row.right();
-    let by = row.center().y - PILL_SMALL / 2.0;
-    let mut picked = None;
-    for (i, (label, cmd, style)) in buttons.into_iter().enumerate().rev() {
-        let w = ui.pill_width(label, false, true);
-        x -= w;
-        let b = Rect::new(x, by, w, PILL_SMALL);
-        x -= PILL_GAP;
-        let clicked = if clickable {
-            ui.pill(wid_n("settingswin.update", i as u64), b, label, None, style).clicked
-        } else {
-            let mut none = Input::default();
-            let mut no_hits = Vec::new();
-            Ui::new(&mut *ui.c, &mut none, &mut no_hits, 0.0).pill(0, b, label, None, style);
-            false
-        };
-        if clicked {
-            picked = Some(cmd);
-        }
-    }
-    let tw = (x - 12.0 - row.x).max(0.0);
-    let cy = row.center().y;
-    crate::activities::text_with_dim(ui, "Update available", &rel.version, Rect::new(row.x, cy - 19.0, tw, 19.0), TextStyle::body().weight(Weight::Semibold));
-    ui.c.text(&rel.headline, Rect::new(row.x, cy + 1.0, tw, 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
-    if let Some(c) = picked {
-        st.cmd(c);
-    }
 }
 
 /// How tall the theme cards are together: as many rows as they fill.

@@ -38,7 +38,6 @@ mod state;
 mod tray;
 mod ui;
 mod version;
-mod updates;
 mod window;
 
 fn main() {
