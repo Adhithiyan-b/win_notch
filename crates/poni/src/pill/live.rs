@@ -23,6 +23,8 @@ use crate::ui::Ui;
 use poni_core::datetime::fmt_countdown;
 use poni_core::frames::fmt_fps;
 use poni_core::geom::{palette, Color, Point, Rect};
+use poni_core::pomodoro::Phase;
+use std::cell::Cell;
 use poni_core::sysmon::fmt_pct;
 
 /// Every collapsed pill is this tall, a capsule (radius = height / 2).

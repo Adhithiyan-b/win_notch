@@ -945,7 +945,6 @@ impl Worker {
     fn command(&mut self, cmd: MediaCmd) {
         let Some(i) = self.chosen.and_then(|sid| self.index_of(sid)) else { return };
         let session = self.sessions[i].session.clone();
-        let apple = nowplaying::is_apple_music(&self.sessions[i].aumid);
         if cmd == MediaCmd::Prepare {
             return;
         }

@@ -152,23 +152,19 @@ pub enum Section {
     Music,
     Popups,
     Tabs,
-    Addons,
     Focus,
-    Caffeine,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 10] = [
+    pub const ALL: [Section; 8] = [
         Section::General,
         Section::Appearance,
         Section::Island,
         Section::Music,
         Section::Popups,
         Section::Tabs,
-        Section::Addons,
         Section::Focus,
-        Section::Caffeine,
         Section::About,
     ];
 
@@ -180,9 +176,7 @@ impl Section {
             Section::Music => "Music and lyrics",
             Section::Popups => "Pop-ups",
             Section::Tabs => "Tabs",
-            Section::Addons => "Add-ons",
             Section::Focus => "Focus",
-            Section::Caffeine => "Caffeine",
             Section::About => "About",
         }
     }
@@ -196,9 +190,7 @@ impl Section {
             Section::Music => "music",
             Section::Popups => "popups",
             Section::Tabs => "tabs",
-            Section::Addons => "addons",
             Section::Focus => "focus",
-            Section::Caffeine => "caffeine",
             Section::About => "about",
         }
     }
@@ -211,9 +203,7 @@ impl Section {
             Section::Music => Icon::Music,
             Section::Popups => Icon::Volume,
             Section::Tabs => Icon::App,
-            Section::Addons => Icon::Addons,
             Section::Focus => Icon::Timer,
-            Section::Caffeine => Icon::Coffee,
             Section::About => Icon::Gear,
         }
     }
@@ -227,19 +217,13 @@ impl Section {
             Section::Music => palette::PINK,
             Section::Popups => palette::CYAN,
             Section::Tabs => palette::GREEN,
-            Section::Addons => Color::hex(0x0A84FF),
             Section::Focus => palette::ORANGE,
-            Section::Caffeine => Color::hex(0xA2845E),
             Section::About => Color::hex(0x8E8E93),
         }
     }
 
-    /// Caffeine has a section only while its add-on is on.
-    pub fn shown(self, st: &AppState) -> bool {
-        match self {
-            Section::Caffeine => st.caffeine_on(),
-            _ => true,
-        }
+    pub fn shown(self, _st: &AppState) -> bool {
+        true
     }
 }
 
@@ -282,11 +266,6 @@ pub enum Key {
     LongEvery,
     AutoBreaks,
     AutoFocus,
-    CaffeineBedtime,
-    CaffeineHalfLife,
-    CaffeineBedLimit,
-    CaffeineDayLimit,
-    CaffeineRemind,
     SettingsFile,
     DataFolder,
     ReleaseNotes,
@@ -331,8 +310,6 @@ pub enum Block {
     Version,
     /// The themes as cards with a small picture of each.
     Themes,
-    /// The Add-ons page itself.
-    Addons,
     /// A dim line of text.
     Note(&'static str),
 }
@@ -352,9 +329,6 @@ const HOVER: [(u32, &str); 3] = [(120, "Quick"), (220, "Normal"), (450, "Slow")]
 const CLOSE: [(u32, &str); 3] = [(0, "At once"), (400, "Short"), (1000, "Long")];
 const DISPLAYS: [(MonitorChoice, &str); 2] = [(MonitorChoice::Primary, "Main display"), (MonitorChoice::Cursor, "Under the pointer")];
 const FULLSCREEN: [(bool, &str); 2] = [(true, "Hide"), (false, "Stay on top")];
-const SOUNDS: [(PrayerSound, &str); 3] = [(PrayerSound::Adzan, "Adzan"), (PrayerSound::Tone, "Tone"), (PrayerSound::Silent, "Silent")];
-/// Whose times and Hijri dates (the Prayer page's place picker has the same).
-const FOLLOWS: [(PrayerFollow, &str); 2] = [(PrayerFollow::Kemenag, "Kemenag"), (PrayerFollow::Muhammadiyah, "Muhammadiyah (KHGT)")];
 const THEMES: [(Theme, &str, &str); 5] = [
     (Theme::Classic, "Classic", "A black island at the top edge"),
     (Theme::Oyen, "Oyen", "Oyen lives in the island"),
@@ -403,7 +377,7 @@ fn idle_name(s: IdleStyle, theme: Theme) -> &'static str {
 
 /// The pages the island may open on: its tabs, but not the Add-ons "+".
 fn start_pages(st: &AppState) -> Vec<PageKind> {
-    crate::pages::tabs(st).into_iter().filter(|p| *p != PageKind::Addons).collect()
+    crate::pages::tabs(st).into_iter().collect()
 }
 
 fn minutes(m: u32) -> String {
@@ -513,9 +487,8 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                     item(Key::Tab(p), p.title(), sub, Ctl::Switch(Some(!st.tab_hidden(p))))
                 })
                 .collect();
-            vec![Block::Group(Some("When the island opens"), open), Block::Group(Some("Tabs in the island"), tabs), Block::Note("Oyenza and the add-ons' pages always have a tab.")]
+            vec![Block::Group(Some("When the island opens"), open), Block::Group(Some("Tabs in the island"), tabs)]
         }
-        Section::Addons => vec![Block::Addons],
         Section::Focus => {
             let p = &s.pomodoro;
             let every = match p.long_every {
@@ -540,47 +513,6 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                         switch(Key::AutoFocus, "Focus sessions", Some("The next session starts when a break ends"), p.auto_start_focus),
                     ],
                 ),
-            ]
-        }
-        Section::Prayer => {
-            let p = &s.prayer;
-            let countdown = if p.remind_before_min == 0 { "Off".to_string() } else { minutes(p.remind_before_min) };
-            let follow_sub = match p.follow {
-                PrayerFollow::Kemenag => "Kemenag's times, the government's Hijri dates",
-                PrayerFollow::Muhammadiyah => "Majelis Tarjih's times, the KHGT calendar",
-            };
-            vec![
-                Block::Group(
-                    Some("Times and Hijri dates"),
-                    vec![item(Key::PrayerCalendar, "Follow", Some(follow_sub), Ctl::Choice(names(&FOLLOWS), chosen(&FOLLOWS, p.follow)))],
-                ),
-                Block::Group(
-                    Some("When it's time"),
-                    vec![
-                        item(Key::PrayerSound, "Sound", Some("Subuh plays the tone"), Ctl::Choice(names(&SOUNDS), chosen(&SOUNDS, p.sound))),
-                        switch(Key::PrayerPause, "Pause music for the adzan", None, p.pause_music),
-                        item(Key::PrayerCountdown, "Countdown before each prayer", Some("On the closed island"), Ctl::Stepper(countdown)),
-                    ],
-                ),
-                Block::Group(Some("Place"), vec![switch(Key::PrayerFollow, "Follow my location", Some("Windows' location picks the nearest place"), p.follow_location)]),
-                Block::Note("Pick a place by hand on the island's Prayer page."),
-            ]
-        }
-        Section::Caffeine => {
-            let c = s.caffeine.sane();
-            let remind = format!("On the island, {} minutes before", caffeine::REMIND_BEFORE);
-            vec![
-                Block::Group(
-                    Some("Last call"),
-                    vec![
-                        item(Key::CaffeineBedtime, "Bedtime", Some("When you usually go to sleep"), Ctl::Stepper(caffeine::hhmm(c.bedtime.into()))),
-                        item(Key::CaffeineHalfLife, "Half-life", Some("Most adults: 2 to 10 hours"), Ctl::Stepper(half_life_text(c.half_life))),
-                        item(Key::CaffeineBedLimit, "Left at bedtime", Some("Last call is when more than this of one drink would still be in you at bedtime"), Ctl::Stepper(format!("{} mg", c.bed_limit_mg))),
-                        switch(Key::CaffeineRemind, "Remind me before last call", Some(remind.as_str()), c.remind),
-                    ],
-                ),
-                Block::Group(None, vec![item(Key::CaffeineDayLimit, "Day limit", Some("400 mg a day for healthy adults, 200 mg in pregnancy"), Ctl::Stepper(format!("{} mg", c.day_limit_mg)))]),
-                Block::Note("Add what you drink on the island's Caffeine page."),
             ]
         }
         Section::About => vec![
@@ -749,24 +681,6 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
         Key::LongEvery => s.pomodoro.long_every = (s.pomodoro.long_every as i32 + step).clamp(0, 12) as u32,
         Key::AutoBreaks => s.pomodoro.auto_start_breaks = !s.pomodoro.auto_start_breaks,
         Key::AutoFocus => s.pomodoro.auto_start_focus = !s.pomodoro.auto_start_focus,
-        Key::PrayerSound => match act {
-            Act::Pick(i) if i < SOUNDS.len() => s.prayer.sound = SOUNDS[i].0,
-            _ => return,
-        },
-        Key::PrayerCountdown => s.prayer.remind_before_min = step_min(s.prayer.remind_before_min, step, 0, 60),
-        Key::PrayerPause => s.prayer.pause_music = !s.prayer.pause_music,
-        Key::PrayerFollow => s.prayer.follow_location = !s.prayer.follow_location,
-        Key::PrayerCalendar => match act {
-            Act::Pick(i) if i < FOLLOWS.len() => s.prayer.follow = FOLLOWS[i].0,
-            _ => return,
-        },
-        Key::CaffeineBedtime => s.caffeine.bedtime = step_bedtime(s.caffeine.sane().bedtime, step),
-        Key::CaffeineHalfLife => s.caffeine.half_life = step_half_life(s.caffeine.sane().half_life, step),
-        Key::CaffeineBedLimit => s.caffeine.bed_limit_mg = step_mg(s.caffeine.sane().bed_limit_mg, step, BED_LIMIT_MG),
-        Key::CaffeineDayLimit => s.caffeine.day_limit_mg = step_mg(s.caffeine.sane().day_limit_mg, step, DAY_LIMIT_MG),
-        Key::CaffeineRemind => s.caffeine.remind = !s.caffeine.remind,
-        Key::AiNotices => s.usage.notices = !s.usage.notices,
-        Key::AiNear => s.usage.near_pct = (s.usage.near_pct as i32 + step * 5).clamp(50, 95) as u8,
         Key::SettingsFile => {
             st.cmd(Command::OpenPath(crate::paths::settings_path().to_string_lossy().into_owned()));
             return;
@@ -1287,7 +1201,6 @@ fn block_h(st: &AppState, b: &Block) -> f32 {
         Block::Group(title, items) => title.map_or(0.0, |_| GROUP_TITLE_H) + items.iter().map(row_h).sum::<f32>(),
         Block::Version => 72.0,
         Block::Themes => GROUP_TITLE_H + theme_cards_h(),
-        Block::Addons => crate::pages::addons::height(st),
         Block::Note(_) => 18.0,
     }
 }
@@ -1332,7 +1245,6 @@ fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, vi
         }
         Block::Version => draw_version(ui, st, r, view, sf),
         Block::Themes => draw_themes(ui, st, r, view, sf, m),
-        Block::Addons => crate::pages::addons::draw(ui, st, r),
         Block::Note(t) => ui.c.text(t, Rect::new(r.x + 2.0, r.y, r.w, r.h), &TextStyle::footnote().color(palette::TEXT_FAINT)),
     }
     next
@@ -1534,9 +1446,7 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
     let cy = head.center().y;
     crate::oyen::app_icon(ui.c, Point::new(head.x + 20.0, cy), 40.0);
     let tx = head.x + 54.0;
-    let clickable = visible(r, view).is_some_and(|v| v.h >= r.h - 0.5);
-    let check = clickable.then(|| crate::pages::settings::check_slot(ui, st, head)).flatten();
-    let right = check.map_or(head.right(), |b| b.x - 12.0);
+    let right = head.right();
     ui.c.text("Dynamic Notch", Rect::new(tx, cy - 20.0, (right - tx).max(0.0), 22.0), &TextStyle::headline());
     ui.c.text(&format!("Version {VERSION}"), Rect::new(tx, cy + 2.0, (right - tx).max(0.0), 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
 }
@@ -1750,39 +1660,22 @@ mod tests {
     }
 
     #[test]
-    fn prayer_times_picks_kemenag_or_muhammadiyah() {
-        let mut st = state();
-        let row = |st: &AppState| blocks(Section::Prayer, st).into_iter().find_map(|b| match b {
-            Block::Group(_, items) => items.into_iter().find(|i| i.key == Key::PrayerCalendar),
-            _ => None,
-        });
-        assert_eq!(row(&st).map(|i| i.ctl), Some(Ctl::Choice(vec!["Kemenag", "Muhammadiyah (KHGT)"], Some(0))));
-        apply(&mut st, Key::PrayerCalendar, Act::Pick(1));
-        assert_eq!(st.settings.prayer.follow, PrayerFollow::Muhammadiyah);
-        assert_eq!(row(&st).map(|i| i.ctl), Some(Ctl::Choice(vec!["Kemenag", "Muhammadiyah (KHGT)"], Some(1))));
-        apply(&mut st, Key::PrayerCalendar, Act::Pick(0));
-        assert_eq!(st.settings.prayer.follow, PrayerFollow::Kemenag);
-    }
-
-    #[test]
     fn steppers_stay_in_range() {
         let mut st = state();
         for _ in 0..100 {
             apply(&mut st, Key::Width, Act::Step(1));
             apply(&mut st, Key::FocusMin, Act::Step(1));
             apply(&mut st, Key::LongEvery, Act::Step(1));
-            apply(&mut st, Key::AiNear, Act::Step(1));
             apply(&mut st, Key::LyricsOffset, Act::Step(1));
         }
         let s = &st.settings;
-        assert_eq!((s.expanded_width, s.pomodoro.focus_min, s.pomodoro.long_every, s.usage.near_pct, s.lyrics_offset_ms), (900.0, 180, 12, 95, -5000));
+        assert_eq!((s.expanded_width, s.pomodoro.focus_min, s.pomodoro.long_every, s.lyrics_offset_ms), (900.0, 180, 12, -5000));
         for _ in 0..100 {
             apply(&mut st, Key::Width, Act::Step(-1));
             apply(&mut st, Key::FocusMin, Act::Step(-1));
-            apply(&mut st, Key::PrayerCountdown, Act::Step(-1));
         }
         let s = &st.settings;
-        assert_eq!((s.expanded_width, s.pomodoro.focus_min, s.prayer.remind_before_min), (480.0, 1, 0));
+        assert_eq!((s.expanded_width, s.pomodoro.focus_min), (480.0, 1));
         // Minutes go by five, and by one below five.
         assert_eq!((step_min(25, -1, 1, 180), step_min(5, -1, 1, 180), step_min(3, 1, 1, 180), step_min(5, 1, 1, 180)), (20, 4, 4, 10));
     }
@@ -1839,131 +1732,11 @@ mod tests {
     }
 
     #[test]
-    fn prayer_has_a_section_only_while_its_add_on_is_on() {
-        let st = state();
-        assert!(!sections(&st).contains(&Section::Prayer));
-        assert_eq!(sections(&st).first(), Some(&Section::General));
-        assert_eq!(sections(&st).last(), Some(&Section::About));
-    }
-
-    /// Caffeine switched on, as its switch on the Add-ons page leaves it.
-    fn with_caffeine() -> AppState {
-        let mut s = Settings::default();
-        s.set_addon(poni_core::addons::CAFFEINE.id, true);
-        AppState::new(s, Store::default())
-    }
-
-    #[test]
-    fn caffeine_has_a_section_only_while_its_add_on_is_on() {
-        assert!(!sections(&state()).contains(&Section::Caffeine));
-        let mut st = with_caffeine();
-        let list = sections(&st);
-        // After Focus (and Prayer times while that is on), with its cup.
-        let at = list.iter().position(|s| *s == Section::Caffeine).expect("its section");
-        assert_eq!((list[at - 1], list.last()), (Section::Focus, Some(&Section::About)));
-        assert_eq!((Section::Caffeine.title(), Section::Caffeine.key(), Section::Caffeine.icon()), ("Caffeine", "caffeine", Icon::Coffee));
-        // Switched off, it goes from the sidebar (an open window shows General).
-        st.addons.insert(poni_core::addons::CAFFEINE.id, poni_core::addons::Status::Off);
-        assert!(!sections(&st).contains(&Section::Caffeine));
-    }
-
-    #[test]
-    fn caffeine_rows_apply_and_stay_in_range() {
-        let mut st = with_caffeine();
-        let steppers = [Key::CaffeineBedtime, Key::CaffeineHalfLife, Key::CaffeineBedLimit, Key::CaffeineDayLimit];
-        let shown = |st: &AppState| -> Vec<String> {
-            steppers
-                .into_iter()
-                .map(|k| match row(Section::Caffeine, st, k).map(|i| i.ctl) {
-                    Some(Ctl::Stepper(v)) => v,
-                    other => panic!("{k:?}: {other:?}"),
-                })
-                .collect()
-        };
-        assert_eq!(shown(&st), ["23:00", "5 h", "35 mg", "400 mg"]);
-        // A step up: a quarter hour, the next half-life, 5 mg and 50 mg. Each saves.
-        for k in steppers {
-            st.cmds.clear();
-            apply(&mut st, k, Act::Step(1));
-            assert!(st.cmds.iter().any(|c| matches!(c, Command::SaveSettings)), "{k:?}");
-        }
-        assert_eq!(shown(&st), ["23:15", "5.5 h", "40 mg", "450 mg"]);
-        // To their ends and no further.
-        for _ in 0..100 {
-            steppers.into_iter().for_each(|k| apply(&mut st, k, Act::Step(1)));
-        }
-        assert_eq!(shown(&st), ["03:00", "15 h", "80 mg", "1000 mg"]);
-        let c = &st.settings.caffeine;
-        assert_eq!((c.bedtime, c.half_life, c.bed_limit_mg, c.day_limit_mg), (3 * 60, 15.0, 80, 1000));
-        for _ in 0..100 {
-            steppers.into_iter().for_each(|k| apply(&mut st, k, Act::Step(-1)));
-        }
-        assert_eq!(shown(&st), ["20:00", "2 h", "10 mg", "100 mg"]);
-        // Bedtime goes past midnight and back, kept as minutes after midnight.
-        st.settings.caffeine.bedtime = 23 * 60 + 45;
-        apply(&mut st, Key::CaffeineBedtime, Act::Step(1));
-        assert_eq!((st.settings.caffeine.bedtime, shown(&st)[0].as_str()), (0, "00:00"));
-        apply(&mut st, Key::CaffeineBedtime, Act::Step(1));
-        assert_eq!(st.settings.caffeine.bedtime, 15);
-        apply(&mut st, Key::CaffeineBedtime, Act::Step(-1));
-        apply(&mut st, Key::CaffeineBedtime, Act::Step(-1));
-        assert_eq!(st.settings.caffeine.bedtime, 23 * 60 + 45);
-        // A value typed into the file goes to the next step that way, or
-        // back into the rows' range.
-        for (d, to) in [(1, 23 * 60 + 15), (-1, 23 * 60)] {
-            st.settings.caffeine.bedtime = 23 * 60 + 7;
-            apply(&mut st, Key::CaffeineBedtime, Act::Step(d));
-            assert_eq!(st.settings.caffeine.bedtime, to);
-        }
-        st.settings.caffeine.bedtime = 12 * 60;
-        apply(&mut st, Key::CaffeineBedtime, Act::Step(-1));
-        assert_eq!(st.settings.caffeine.bedtime, 20 * 60);
-        st.settings.caffeine.half_life = 5.2;
-        apply(&mut st, Key::CaffeineHalfLife, Act::Step(1));
-        assert_eq!(st.settings.caffeine.half_life, 5.5);
-        st.settings.caffeine.half_life = f32::NAN;
-        apply(&mut st, Key::CaffeineHalfLife, Act::Step(-1));
-        assert_eq!(st.settings.caffeine.half_life, 4.5);
-        st.settings.caffeine.bed_limit_mg = 37;
-        apply(&mut st, Key::CaffeineBedLimit, Act::Step(-1));
-        assert_eq!(st.settings.caffeine.bed_limit_mg, 35);
-        st.settings.caffeine.day_limit_mg = 5000;
-        apply(&mut st, Key::CaffeineDayLimit, Act::Step(-1));
-        assert_eq!(st.settings.caffeine.day_limit_mg, 1000);
-        // What the rows set is what the add-on uses as it is.
-        assert_eq!(st.settings.caffeine.sane(), st.settings.caffeine);
-        // The reminder's switch.
-        let remind = |st: &AppState| row(Section::Caffeine, st, Key::CaffeineRemind).map(|i| i.ctl);
-        assert_eq!(remind(&st), Some(Ctl::Switch(Some(true))));
-        apply(&mut st, Key::CaffeineRemind, Act::Toggle);
-        assert!(!st.settings.caffeine.remind && st.cmds.iter().any(|c| matches!(c, Command::SaveSettings)));
-        assert_eq!(remind(&st), Some(Ctl::Switch(Some(false))));
-        apply(&mut st, Key::CaffeineRemind, Act::Toggle);
-        assert!(st.settings.caffeine.remind);
-    }
-
-    #[test]
     fn the_sidebar_has_room_for_every_section_at_full_height() {
-        // Every section but About is a row from the top, About sits 12 DIPs
-        // above the card's bottom (`draw_sidebar`), with Prayer times,
-        // Caffeine and AI usage all shown. The Mac's window buttons take
-        // `TITLEBAR` (28) of its 600.
         let rows = (Section::ALL.len() - 1) as f32;
         let last = NAV_Y + rows * (NAV_H + NAV_GAP) - NAV_GAP;
         assert!(last + NAV_GAP <= CARD_H - 12.0 - NAV_H, "Windows: {last}");
         assert!(28.0 + last + NAV_GAP <= 600.0 - 12.0 - NAV_H, "Mac: {last}");
-    }
-
-    #[test]
-    fn caffeine_fits_the_window_at_its_full_height_without_scrolling() {
-        let st = with_caffeine();
-        let content: f32 = blocks(Section::Caffeine, &st).iter().map(|b| block_h(&st, b) + GROUP_GAP).sum();
-        assert!(content + 16.0 <= CARD_H - CONTENT_Y - 1.0, "{content}");
-        // Its help lines say the half-life's usual range and the day's limits.
-        let sub = |k| row(Section::Caffeine, &st, k).and_then(|i| i.sub).unwrap_or_default();
-        assert_eq!(sub(Key::CaffeineHalfLife), "Most adults: 2 to 10 hours");
-        assert_eq!(sub(Key::CaffeineDayLimit), "400 mg a day for healthy adults, 200 mg in pregnancy");
-        assert_eq!(sub(Key::CaffeineRemind), format!("On the island, {} minutes before", caffeine::REMIND_BEFORE));
     }
 
     #[test]

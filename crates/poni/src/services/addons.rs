@@ -32,7 +32,7 @@
 //! (`mac/services/http.rs`), for the add-ons it offers.
 
 use crate::events::{AppEvent, EventSink};
-use crate::services::http::{Client, FetchError, MtaGuard};
+use crate::services::http::{Client, MtaGuard};
 use poni_core::addons::{self, Addon, AddonFile, Status};
 use std::collections::BTreeMap;
 use std::fs;

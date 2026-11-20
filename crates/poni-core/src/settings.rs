@@ -143,6 +143,8 @@ pub struct Settings {
     /// the screen. Off (the default), the readout stays while the game is in
     /// front.
     pub game_peek: bool,
+    /// What the Record page records next: its last picks.
+    pub record: RecordSettings,
 }
 
 /// What the AI tab shows and whether it gives heads-up notices.
@@ -223,6 +225,7 @@ impl Default for Settings {
             caffeine: crate::caffeine::Prefs::default(),
             game_stats: false,
             game_peek: false,
+            record: RecordSettings::default(),
             notifications: crate::notifications::NotificationSettings::default(),
         }
     }

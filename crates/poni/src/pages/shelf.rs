@@ -16,7 +16,7 @@ use crate::dragdrop;
 use crate::gfx::{Image, ImageData, TextStyle, Weight};
 use crate::icons::Icon;
 use crate::services::imaging::{self, PathKind};
-use crate::state::{AppState, PairedPhone, PhoneDrop, PhoneView};
+use crate::state::{AppState, PhoneDrop, PhoneView};
 use crate::ui::{wid, wid_n, PillStyle, Ui, WidgetId, PILL_GAP, PILL_SMALL};
 use poni_core::geom::{palette, Color, Point, Rect};
 use poni_core::phonedrop::{fmt_bytes, QrMatrix};
@@ -716,8 +716,7 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
             ui.c.fill_rrect(qr_r, 12.0, Color::white(0.06));
             let c = qr_r.center();
             ui.c.icon(Icon::Phone, Rect::from_center(Point::new(c.x, c.y - 14.0), 26.0, 26.0), palette::TEXT_DIM);
-            let n = st.paired.len();
-            ui.c.text(&format!("{n} paired"), Rect::new(qr_r.x, c.y + 10.0, qr_r.w, 20.0), &TextStyle::headline().center());
+            ui.c.text("0 paired", Rect::new(qr_r.x, c.y + 10.0, qr_r.w, 20.0), &TextStyle::headline().center());
         }
         _ => match &pd.qr {
             Some(qr) => draw_qr(ui, l, qr, &pd.url, qr_r),

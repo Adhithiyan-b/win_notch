@@ -49,7 +49,7 @@ pub fn message_notice(seen: &Seen, choices: &NotificationSettings, accent: Color
         subtitle: said.subtitle,
         until: now + notifications::NOTICE_S,
         action: Some(NoticeAction::OpenApp(seen.app_id.clone())),
-        inline: Some(if said.reveal.is_some() { InlineAction::ShowAmount } else { InlineAction::Open }),
+        inline: Some(InlineAction::Open),
         reveal: said.reveal,
     })
 }

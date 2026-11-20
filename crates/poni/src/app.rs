@@ -23,7 +23,7 @@ use crate::state::{
 use crate::tray::{self, Tray};
 use crate::ui::{wid, CursorKind, Hit, Input, KeyInput, MouseButton, Ui};
 use crate::window::{self, FrameClock, FrameTick, MonitorInfo};
-use crate::{dragdrop, selftest, shell};
+use crate::{dragdrop, shell};
 use poni_core::spot;
 use poni_core::addons::Status as AddonStatus;
 use poni_core::frametime::{ambient_divisor, MotionStats};
@@ -380,8 +380,6 @@ pub struct App {
     services: Option<Services>,
     /// The Glass theme's screen copy, light/dark choice and glass.
     glass: crate::glass::Glass,
-    /// Caffeine's reminder before last call: its minute and the day it showed.
-    last_call: crate::last_call::Reminder,
     /// The self-test runs (for the whole run: `selftest` itself is taken out
     /// while a step runs).
     in_selftest: bool,
@@ -467,7 +465,6 @@ pub struct App {
     icon_wait: HashSet<String>,
     tray: Option<Tray>,
     taskbar_created_msg: u32,
-    selftest: Option<selftest::SelfTest>,
     exit_code: i32,
     /// Settings as last written to disk (to diff page-made changes).
     saved_settings: Settings,
@@ -673,11 +670,7 @@ impl App {
         }
         let clock = FrameClock::start(SendHwnd::new(hwnd), monitor.handle);
         let taskbar_created_msg = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
-        // Oyenza Studio Recorder installed: the Record tab can show (one registry read).
-        st.recorder = selftest_dir.is_none() && services::recorder::installed();
-        // The Downloader: not in the Microsoft Store build.
-        st.downloader_offered = !crate::autostart::packaged();
-        let selftest = selftest_dir.map(selftest::SelfTest::new);
+        st.recorder = services::recorder::installed();
         let saved_settings = st.settings.clone();
         Ok(Self {
             hwnd,
@@ -700,7 +693,6 @@ impl App {
             rx,
             services: None,
             glass: crate::glass::Glass::new(services::apps_use_light_theme()),
-            last_call: Default::default(),
             in_selftest: selftest.is_some(),
             glass_moving: false,
             last_frame_t: 0.0,
@@ -1494,12 +1486,6 @@ impl App {
             }
             WM_HOTKEY if wp.0 == HOTKEY_PEEK as usize => {
                 self.toggle_readout();
-                self.request_frame();
-                Some(LRESULT(0))
-            }
-            WM_HOTKEY if wp.0 == HOTKEY_SCRIPT as usize => {
-                self.st.now = clock::mono();
-                pages::script::toggle(&mut self.st);
                 self.request_frame();
                 Some(LRESULT(0))
             }
@@ -2680,44 +2666,7 @@ impl App {
     }
 
     /// Alt+Shift+S belongs to Poni only while the Script page can read.
-    fn set_script_hotkey(&mut self, on: bool) {
-        if on == self.script_hotkey {
-            return;
-        }
-        unsafe {
-            if on {
-                match RegisterHotKey(self.helper, HOTKEY_SCRIPT, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, u32::from(b'S')) {
-                    Ok(()) => self.script_hotkey = true,
-                    Err(e) => pwarn!("script: Alt+Shift+S is taken ({e})"),
-                }
-            } else {
-                let _ = UnregisterHotKey(self.helper, HOTKEY_SCRIPT);
-                self.script_hotkey = false;
-            }
-        }
-    }
-
-    /// The Script page: a reading pauses while its page isn't on screen, the
-    /// island may close once nothing holds it, and the shortcut is Poni's
-    /// only while there's a script to read on the page. Whether Record shows
-    /// is asked as the page comes on screen.
-    fn script_tick(&mut self) {
-        let shown = self.expanded && self.st.page == PageKind::Script && !self.locked && !self.display_off && !self.fullscreen_hidden;
-        if shown && !self.script_shown && self.selftest.is_none() {
-            self.st.recorder = services::recorder::installed();
-        }
-        self.script_shown = shown;
-        if !shown && self.st.script.playing() {
-            self.st.script.pause(self.st.now);
-        }
-        let held = self.st.script_holds_island();
-        if self.script_held && !held {
-            self.maybe_schedule_collapse();
-        }
-        self.script_held = held;
-        let can_read = self.st.page == PageKind::Script && !self.st.store.script.is_empty() && (self.expanded || self.st.script.active);
-        self.set_script_hotkey(can_read && self.selftest.is_none());
-    }
+    fn script_tick(&mut self) {}
 
     /// Oyenza Studio Recorder's word on its recording, or "show yourself"
     /// (`recorder_message`). True when the island takes it: it shows the
@@ -3148,22 +3097,14 @@ impl App {
         if let Some(ended) = self.st.pomodoro.tick(now) {
             pages::focus::on_phase_ended(&mut self.st, ended);
         }
-        // Caffeine's reminder before last call waits for the island the same
-        // way, behind a prayer's notice, which doesn't wait. The self-test's
-        // clock jumps between pictures: it shows none.
-        let here = !self.fullscreen_hidden && !self.locked && !self.display_off && !self.expanded && !peeks;
-        if !self.in_selftest && self.last_call.tick(&mut self.st, here) {
-            self.request_frame();
-        }
         self.script_tick();
         let gone = match self.st.page {
             PageKind::System => !self.st.system_on(),
-            PageKind::Caffeine => !self.st.caffeine_on(),
             PageKind::Notifications => !self.st.notifications_on(),
             _ => false,
         };
         if gone {
-            self.st.page = PageKind::Addons;
+            self.st.page = PageKind::Media;
         }
     }
 
@@ -3713,11 +3654,6 @@ impl App {
         let singing = self.mode == Mode::Activity(activities::Activity::Media);
         let watched = visible && !((pill::on(self.st.settings.theme) || singing) && (self.locked || self.display_off));
         if let Some(t) = activities::next_wake(&self.mode, &self.st).filter(|_| watched) {
-            consider(t);
-        }
-        // Caffeine's reminder comes on its minute, the island asleep or not
-        // (one wake a day at most).
-        if let Some(t) = self.last_call.wake(&self.st) {
             consider(t);
         }
         if let Mode::Expanded(p) = self.mode {
